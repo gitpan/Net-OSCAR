@@ -83,7 +83,7 @@ EVENT PROCESSING
             # process our events.
 
 FUNCTIONALITY
-    "Net::OSCAR" pretends to be WinAIM 4.3.2229. It supports remote
+    "Net::OSCAR" pretends to be WinAIM 4.7.2480. It supports remote
     buddylists including permit and deny settings. It also supports chat. At
     the present time, setting and retrieving of directory information is not
     supported; nor are email privacy settings, buddy icons, voice chat,
@@ -149,7 +149,7 @@ METHODS
 
                 $oscar->signon(screenname => "123456", password => "password", OSCAR_SVC_ICQ);
 
-    auth_response MD5_DIGEST
+    auth_response (MD5_DIGEST)
         Provide a response to an authentication challenge - see the
         "auth_challenge" callback for details.
 
@@ -168,7 +168,7 @@ METHODS
 
         See the "log" callback for more information.
 
-    findconn FILENO
+    findconn (FILENO)
         Finds the connection that is using the specified file number, or
         undef if the connection could not be found. Returns a
         "Net::OSCAR::Connection" object.
@@ -210,11 +210,11 @@ METHODS
         Revert changes you've made to the buddylist, assuming you haven't
         called "commit_buddylist" since making them.
 
-    reorder_groups GROUPS
+    reorder_groups (GROUPS)
         Changes the ordering of the groups in your buddylist. Call
         "commit_buddylist" to save the new order on the OSCAR server.
 
-    reorder_buddies GROUP BUDDIES
+    reorder_buddies (GROUP, BUDDIES)
         Changes the ordering of the buddies in a group on your buddylist.
         Call "commit_buddylist" to save the new order on the OSCAR server.
 
@@ -279,7 +279,7 @@ METHODS
 
         Call "commit_buddylist" for the change to take effect.
 
-    set_group_permissions NEWPERMS
+    set_group_permissions (NEWPERMS)
         Set group permissions. This lets you block any OSCAR users or any
         AOL users. "NEWPERMS" should be a list of zero or more of the
         following constants:
@@ -299,7 +299,7 @@ METHODS
     profile
         Returns your current profile.
 
-    get_app_data [GROUP[, BUDDY]]
+    get_app_data ([GROUP[, BUDDY]])
         Gets application-specific data. Returns a hashref whose keys are
         app-data IDs. IDs with high-order byte 0x0001 are reserved for
         non-application-specific usage and must be registered with the
@@ -327,7 +327,7 @@ METHODS
         Similar to get_info, except requests the user's away message instead
         of their profile.
 
-    send_im(WHO, MESSAGE[, AWAY])
+    send_im (WHO, MESSAGE[, AWAY])
         Sends someone an instant message. If the message is an automated
         reply generated, perhaps, because you have an away message set, give
         the AWAY parameter a non-zero value. Note that "Net::OSCAR" will not
@@ -394,7 +394,7 @@ METHODS
         screenname, except that case may be changed and spaces may be
         inserted or deleted.
 
-    chat_join(NAME[, EXCHANGE])
+    chat_join (NAME[, EXCHANGE])
         Creates (or joins?) a chatroom. The exchange parameter should
         probably not be specified unless you know what you're doing. Do not
         use this method to accept invitations to join a chatroom - use the
@@ -499,21 +499,21 @@ METHODS
         Returns true if the user is signed on to the OSCAR service.
         Otherwise, returns false.
 
-    set_buddy_comment(GROUP, BUDDY[, COMMENT])
+    set_buddy_comment (GROUP, BUDDY[, COMMENT])
         Set a brief comment about a buddy. This can be used for things such
         as the buddy's real name. You must call "commit_buddylist" to save
         the comment to the server. If COMMENT is undefined, the comment is
         deleted.
 
-    chat_invite(CHAT, MESSAGE, WHO)
+    chat_invite (CHAT, MESSAGE, WHO)
         Deprecated. Provided for compatibility with "Net::AIM". Use the
         appropriate method of the "Net::OSCAR::Chat" object instead.
 
-    chat_leave(CHAT)
+    chat_leave (CHAT)
         Deprecated. Provided for compatibility with "Net::AIM". Use the
         appropriate method of the "Net::OSCAR::Chat" object instead.
 
-    chat_send(CHAT, MESSAGE)
+    chat_send (CHAT, MESSAGE)
         Deprecated. Provided for compatibility with "Net::AIM". Use the
         appropriate method of the "Net::OSCAR::Chat" object instead.
 
@@ -521,7 +521,7 @@ CALLBACKS
     "Net::OSCAR" uses a callback mechanism to notify you about different
     events. A callback is registered by calling the
     "set_callback_callbackname" method with a code reference as a parameter.
-    For instance, you might call "$oscar-"set_callback_error(\&got_error);>.
+    For instance, you might call "$oscar->set_callback_error(\&got_error);".
     Your callback function will be passed parameters which are different for
     each callback type (and are documented below). The first parameter to
     each callback function will be the "Net::OSCAR" object which generated
@@ -532,7 +532,7 @@ CALLBACKS
 
         "CONNECTION" is the particular connection which generated the error
         - the "log_print" method of "Net::OSCAR::Connection" may be useful,
-        as may be getting "$connection-"{description}>. "DESCRIPTION" is a
+        as may be getting "$connection->{description}". "DESCRIPTION" is a
         nicely formatted description of the error. "ERROR" is an error
         number.
 
@@ -615,23 +615,23 @@ CALLBACKS
         reply, perhaps because you sent that person a message and they had
         an away message set.
 
-    chat_im_in(OSCAR, FROM, CHAT, MESSAGE)
+    chat_im_in (OSCAR, FROM, CHAT, MESSAGE)
         Called when someone says something in a chatroom. Note that you
         receive your own messages in chatrooms unless you specify the
         NOREFLECT parameter in chat_send.
 
-    chat_invite(OSCAR, WHO, MESSAGE, CHAT, CHATURL)
+    chat_invite (OSCAR, WHO, MESSAGE, CHAT, CHATURL)
         Called when someone invites us into a chatroom. MESSAGE is the
         message that they specified on the invitation. CHAT is the name of
         the chatroom. CHATURL is a chat URL and not a "Net::OSCAR::Chat"
         object. CHATURL can be passed to the chat_accept method to accept
         the invitation.
 
-    chat_joined(OSCAR, CHATNAME, CHAT)
+    chat_joined (OSCAR, CHATNAME, CHAT)
         Called when you enter a chatroom. CHAT is the "Net::OSCAR::Chat"
         object for the chatroom.
 
-    evil(OSCAR, NEWEVIL[, FROM])
+    evil (OSCAR, NEWEVIL[, FROM])
         Called when your evil level changes. NEWEVIL is your new evil level,
         as a percentage (accurate to tenths of a percent.) ENEMY is undef if
         the evil was anonymous (or if the message was triggered because your
@@ -639,15 +639,15 @@ CALLBACKS
         the person who sent us the evil. See the "evil" method for more
         information on evils.
 
-    buddy_info(OSCAR, SCREENNAME, BUDDY DATA)
+    buddy_info (OSCAR, SCREENNAME, BUDDY DATA)
         Called in response to a get_info or get_away request. BUDDY DATA is
         the same as that returned by the buddy method, except that one of
         two additional keys, "profile" and "awaymsg", may be present.
 
-    signon_done(OSCAR)
+    signon_done (OSCAR)
         Called when the user is completely signed on to the service.
 
-    auth_challenge(OSCAR, CHALLENGE, HASHSTR)
+    auth_challenge (OSCAR, CHALLENGE, HASHSTR)
         OSCAR uses an MD5-based challenge/response system for authentication
         so that the password is never sent in plaintext over the network.
         When a user wishes to sign on, the OSCAR server sends an arbitrary
@@ -673,7 +673,7 @@ CALLBACKS
         It is available for AIM but not ICQ. Note also that the MD5 digest
         must be in binary form, not the more common hex or base64 forms.
 
-    log(OSCAR, LEVEL, MESSAGE)
+    log (OSCAR, LEVEL, MESSAGE)
         Use this callback if you don't want the log_print methods to just
         print to STDERR. It is called when even "MESSAGE" of level "LEVEL"
         is called. The levels are, in order of increasing importance:
@@ -701,7 +701,7 @@ CALLBACKS
         OSCAR_DBG_WARN
 
         Note that these symbols are imported into your namespace if and only
-        if you use the ":loglevels" or <:all> tags when importing the module
+        if you use the ":loglevels" or ":all" tags when importing the module
         (e.g. "use Net::OSCAR qw(:standard :loglevels)".)
 
         Also note that this callback is only triggered for events whose
@@ -709,7 +709,7 @@ CALLBACKS
         session. The "loglevel" method allows you to get or set the
         loglevel.
 
-    connection_changed OSCAR CONNECTION STATUS
+    connection_changed (OSCAR, CONNECTION, STATUS)
         Called when the status of a connection changes. The status is "read"
         if we should call "process_one" on the connection when "select"
         indicates that the connection is ready for reading, "write" if we
@@ -833,6 +833,15 @@ MISCELLANEOUS
         method of "Net::OSCAR::Connection", not "Net::OSCAR".
 
 HISTORY
+    *   0.59, 2002-02-15
+
+        *   Protocol fixes - solves problem with AOL calling us an
+            unauthorized client
+
+        *   Better handling of socket errors, especially when writing
+
+        *   Minor POD fixes
+
     *   0.58, 2002-01-20
 
         *   Send buddylist deletions before adds - needed for complex BL

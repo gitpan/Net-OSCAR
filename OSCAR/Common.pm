@@ -1,6 +1,6 @@
 package Net::OSCAR::Common;
 
-$VERSION = 0.58;
+$VERSION = 0.59;
 
 use strict;
 use vars qw(@ISA @EXPORT_OK %EXPORT_TAGS $VERSION);
@@ -123,7 +123,7 @@ use constant GROUPPERM_AOL => dualvar(0x04, "AOL subscribers");
 use constant OSCAR_SVC_AIM => (
 	host => 'login.oscar.aol.com',
 	port => 5190,
-	supermajor => 109,
+	supermajor => 0x0109,
 	major => 4,
 	minor => 7,
 	subminor => 0,

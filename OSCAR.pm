@@ -1,6 +1,6 @@
 package Net::OSCAR;
 
-$VERSION = 0.58;
+$VERSION = 0.59;
 
 =head1 NAME
 
@@ -89,7 +89,7 @@ demonstrates how to use this method with multiple C<Net::OSCAR> objects:
 
 =head1 FUNCTIONALITY
 
-C<Net::OSCAR> pretends to be WinAIM 4.3.2229.  It supports remote buddylists
+C<Net::OSCAR> pretends to be WinAIM 4.7.2480.  It supports remote buddylists
 including permit and deny settings.  It also supports chat.  At the present
 time, setting and retrieving of directory information is not supported; nor
 are email privacy settings, buddy icons, voice chat, stock ticker, and
@@ -266,7 +266,7 @@ sub signon($@) {
 
 =pod
 
-=item auth_response MD5_DIGEST
+=item auth_response (MD5_DIGEST)
 
 Provide a response to an authentication challenge - see the L<"auth_challenge">
 callback for details.
@@ -352,7 +352,7 @@ sub delconn($$) {
 				close $connection->{socket} if $connection->{socket};
 			};
 		} else {
-			if($connection->{conntype} == CONNTYPE_BOS) {
+			if($connection->{conntype} == CONNTYPE_BOS or ($connection->{conntype} == CONNTYPE_LOGIN and !$connection->{closing})) {
 				$self->callback_connection_changed($connection, "deleted");
 				delete $connection->{socket};
 				return $self->crapout($connection, "Lost connection to BOS");
@@ -374,7 +374,7 @@ sub delconn($$) {
 
 =pod
 
-=item findconn FILENO
+=item findconn (FILENO)
 
 Finds the connection that is using the specified file number, or undef
 if the connection could not be found.  Returns a C<Net::OSCAR::Connection>
@@ -425,20 +425,24 @@ sub process_connections($\$\$\$) {
 
 	# Filter out our connections and remove them from the to-do list
 	foreach my $connection(@{$self->{connections}}) {
+		my($read, $write) = (0, 0);
 		next unless $connection->fileno;
 		if($connection->{connected}) {
 			next unless vec($$readers | $$errors, $connection->fileno, 1);
 			vec($$readers, $connection->fileno, 1) = 0;
-		} else {
+			$read = 1;
+		}
+		if(!$connection->{connected} or $connection->{outbuff}) {
 			next unless vec($$writers | $$errors, $connection->fileno, 1);
 			vec($$writers, $connection->fileno, 1) = 0;
+			$write = 1;
 		}
 		if(vec($$errors, $connection->fileno, 1)) {
 			vec($$errors, $connection->fileno, 1) = 0;
 			$connection->{sockerr} = 1;
 			$connection->disconnect();
 		} else {
-			$connection->process_one();
+			$connection->process_one($read, $write);
 		}
 	}
 }
@@ -553,13 +557,13 @@ documentation.
 Revert changes you've made to the buddylist, assuming you haven't called
 L<"commit_buddylist"> since making them.
 
-=item reorder_groups GROUPS
+=item reorder_groups (GROUPS)
 
 Changes the ordering of the groups in your buddylist.  Call L<"commit_buddylist"> to
 save the
 new order on the OSCAR server.
 
-=item reorder_buddies GROUP BUDDIES
+=item reorder_buddies (GROUP, BUDDIES)
 
 Changes the ordering of the buddies in a group on your buddylist.
 Call L<"commit_buddylist"> to save the new order on the OSCAR server.
@@ -713,7 +717,7 @@ sub set_visibility($$) {
 
 =pod
 
-=item set_group_permissions NEWPERMS
+=item set_group_permissions (NEWPERMS)
 
 Set group permissions.  This lets you block any OSCAR users or any AOL users.
 C<NEWPERMS> should be a list of zero or more of the following constants:
@@ -774,7 +778,7 @@ sub profile($) { return shift->{profile}; }
 
 =pod
 
-=item get_app_data [GROUP[, BUDDY]]
+=item get_app_data ([GROUP[, BUDDY]])
 
 Gets application-specific data.  Returns a hashref whose keys are app-data IDs.
 IDs with high-order byte 0x0001 are reserved for non-application-specific usage
@@ -928,7 +932,7 @@ sub get_away($$) {
 
 =pod
 
-=item send_im(WHO, MESSAGE[, AWAY])
+=item send_im (WHO, MESSAGE[, AWAY])
 
 Sends someone an instant message.  If the message is an automated reply generated,
 perhaps, because you have an away message set, give the AWAY parameter a non-zero
@@ -1254,7 +1258,7 @@ sub format_screenname($$) {
 
 =pod
 
-=item chat_join(NAME[, EXCHANGE])
+=item chat_join (NAME[, EXCHANGE])
 
 Creates (or joins?) a chatroom.  The exchange parameter should probably not be
 specified unless you know what you're doing.  Do not use this method
@@ -1402,7 +1406,8 @@ sub selector_filenos($) {
 		next unless $connection->{socket};
 		if($connection->{connected}) {
 			vec($rin, fileno $connection->{socket}, 1) = 1;
-		} else {
+		}
+		if(!$connection->{connected} or $connection->{outbuff}) {
 			vec($win, fileno $connection->{socket}, 1) = 1;
 		}
 	}
@@ -1519,7 +1524,7 @@ sub is_on($) { return shift->{is_on}; }
 
 =pod
 
-=item set_buddy_comment(GROUP, BUDDY[, COMMENT])
+=item set_buddy_comment (GROUP, BUDDY[, COMMENT])
 
 Set a brief comment about a buddy.  This can be used for things such
 as the buddy's real name.  You must call L<"commit_buddylist"> to save
@@ -1536,7 +1541,7 @@ sub set_buddy_comment($$$;$) {
 
 =pod
 
-=item chat_invite(CHAT, MESSAGE, WHO)
+=item chat_invite (CHAT, MESSAGE, WHO)
 
 Deprecated.  Provided for compatibility with C<Net::AIM>.
 Use the appropriate method of the C<Net::OSCAR::Chat> object
@@ -1552,13 +1557,13 @@ sub chat_invite($$$@) {
 
 =pod
 
-=item chat_leave(CHAT)
+=item chat_leave (CHAT)
 
 Deprecated.  Provided for compatibility with C<Net::AIM>.
 Use the appropriate method of the C<Net::OSCAR::Chat> object
 instead.
 
-=item chat_send(CHAT, MESSAGE)
+=item chat_send (CHAT, MESSAGE)
 
 Deprecated.  Provided for compatibility with C<Net::AIM>.
 Use the appropriate method of the C<Net::OSCAR::Chat> object
@@ -1578,7 +1583,7 @@ sub chat_send($$$) { $_[1]->chat_send($_[2]); }
 C<Net::OSCAR> uses a callback mechanism to notify you about different events.
 A callback is registered by calling the C<set_callback_callbackname> method
 with a code reference as a parameter.  For instance, you might call
-C<$oscar->set_callback_error(\&got_error);>.  Your callback function will
+C<$oscar-E<gt>set_callback_error(\&got_error);>.  Your callback function will
 be passed parameters which are different for each callback type (and are
 documented below).  The first parameter to each callback function will be
 the C<Net::OSCAR> object which generated the callback.  This is useful
@@ -1591,7 +1596,7 @@ when using multiple C<Net::OSCAR> objects.
 Called when any sort of error occurs (except see L<admin_error> below.)
 
 C<CONNECTION> is the particular connection which generated the error - the C<log_print> method of
-C<Net::OSCAR::Connection> may be useful, as may be getting C<$connection->{description}>.
+C<Net::OSCAR::Connection> may be useful, as may be getting C<$connection-E<gt>{description}>.
 C<DESCRIPTION> is a nicely formatted description of the error.  C<ERROR> is an error number.
 
 If C<FATAL> is non-zero, the error was fatal and the connection to OSCAR has been
@@ -1675,25 +1680,25 @@ Called when someone sends you an instant message.  If the AWAY parameter
 is non-zero, the message was generated as an automatic reply, perhaps because
 you sent that person a message and they had an away message set.
 
-=item chat_im_in(OSCAR, FROM, CHAT, MESSAGE)
+=item chat_im_in (OSCAR, FROM, CHAT, MESSAGE)
 
 Called when someone says something in a chatroom.  Note that you
 receive your own messages in chatrooms unless you specify the
 NOREFLECT parameter in L<chat_send>.
 
-=item chat_invite(OSCAR, WHO, MESSAGE, CHAT, CHATURL)
+=item chat_invite (OSCAR, WHO, MESSAGE, CHAT, CHATURL)
 
 Called when someone invites us into a chatroom.  MESSAGE is the message
 that they specified on the invitation.  CHAT is the name of the chatroom.
 CHATURL is a chat URL and not a C<Net::OSCAR::Chat> object.  CHATURL can
 be passed to the L<chat_accept> method to accept the invitation.
 
-=item chat_joined(OSCAR, CHATNAME, CHAT)
+=item chat_joined (OSCAR, CHATNAME, CHAT)
 
 Called when you enter a chatroom.  CHAT is the C<Net::OSCAR::Chat>
 object for the chatroom.
 
-=item evil(OSCAR, NEWEVIL[, FROM])
+=item evil (OSCAR, NEWEVIL[, FROM])
 
 Called when your evil level changes.  NEWEVIL is your new evil level,
 as a percentage (accurate to tenths of a percent.)  ENEMY is undef
@@ -1702,18 +1707,18 @@ your evil level naturally decreased), otherwise it is the screenname
 of the person who sent us the evil.  See the L<"evil"> method for
 more information on evils.
 
-=item buddy_info(OSCAR, SCREENNAME, BUDDY DATA)
+=item buddy_info (OSCAR, SCREENNAME, BUDDY DATA)
 
 Called in response to a L<get_info> or L<get_away> request.
 BUDDY DATA is the same as that returned by the L<buddy> method,
 except that one of two additional keys, C<profile> and C<awaymsg>,
 may be present.
 
-=item signon_done(OSCAR)
+=item signon_done (OSCAR)
 
 Called when the user is completely signed on to the service.
 
-=item auth_challenge(OSCAR, CHALLENGE, HASHSTR)
+=item auth_challenge (OSCAR, CHALLENGE, HASHSTR)
 
 OSCAR uses an MD5-based challenge/response system for authentication so that the
 password is never sent in plaintext over the network.  When a user wishes to sign on,
@@ -1738,7 +1743,7 @@ Note that this functionality is only available for certain services.  It is
 available for AIM but not ICQ.  Note also that the MD5 digest must be in binary
 form, not the more common hex or base64 forms.
 
-=item log(OSCAR, LEVEL, MESSAGE)
+=item log (OSCAR, LEVEL, MESSAGE)
 
 Use this callback if you don't want the log_print methods to just print to STDERR.
 It is called when even C<MESSAGE> of level C<LEVEL> is called.  The levels are,
@@ -1775,13 +1780,13 @@ some-day and be replaced by a more flexible facility/level system, ala syslog.
 =back
 
 Note that these symbols are imported into your namespace if and only if you use
-the C<:loglevels> or <:all> tags when importing the module (e.g. C<use Net::OSCAR qw(:standard :loglevels)>.)
+the C<:loglevels> or C<:all> tags when importing the module (e.g. C<use Net::OSCAR qw(:standard :loglevels)>.)
 
 Also note that this callback is only triggered for events whose level is greater
 than or equal to the loglevel for the OSCAR session.  The L<"loglevel"> method
 allows you to get or set the loglevel.
 
-=item connection_changed OSCAR CONNECTION STATUS
+=item connection_changed (OSCAR, CONNECTION, STATUS)
 
 Called when the status of a connection changes.  The status is "read" if we
 should call C<process_one> on the connection when C<select> indicates that
@@ -2038,6 +2043,26 @@ of C<Net::OSCAR::Connection>, not C<Net::OSCAR>.
 
 =item *
 
+0.59, 2002-02-15
+
+=over 4
+
+=item *
+
+Protocol fixes - solves problem with AOL calling us an unauthorized client
+
+=item *
+
+Better handling of socket errors, especially when writing
+
+=item *
+
+Minor POD fixes
+
+=back
+
+=item *
+
 0.58, 2002-01-20
 
 =over 4
@@ -2257,7 +2282,7 @@ Fixed MANIFEST - we don't actually use Changes (and we do use Screenname.pm)
 
 =item *
 
-blinternal now automagically enforces the proper structure (the right things become Net::OSCAR::TLV tied hashes and the name and data keys are automatically created) upon vivification.  So, you can do $bli->{0}->{1}->{2}->{data}->{0x3} = "foo" without worrying if 0, 1, 2, or data have been tied.  Should close bug #47.
+blinternal now automagically enforces the proper structure (the right things become Net::OSCAR::TLV tied hashes and the name and data keys are automatically created) upon vivification.  So, you can do $bli-E<gt>{0}-E<gt>{1}-E<gt>{2}-E<gt>{data}-E<gt>{0x3} = "foo" without worrying if 0, 1, 2, or data have been tied.  Should close bug #47.
 
 =back
 
@@ -2344,7 +2369,7 @@ delete returns the correct value now in Net::OSCAR::Buddylist.
 
 =item *
 
-Don't use warnings if $] <= 5.005
+Don't use warnings if $] E<lt>= 5.005
 
 =item *
 

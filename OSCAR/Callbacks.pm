@@ -1,6 +1,6 @@
 package Net::OSCAR::Callbacks;
 
-$VERSION = 0.58;
+$VERSION = 0.59;
 
 use strict;
 use vars qw($VERSION);
@@ -60,6 +60,7 @@ sub process_snac($$) {
 			return 0;
 		} else {
 			$connection->log_print(OSCAR_DBG_SIGNON, "Login OK - connecting to BOS");
+			$connection->{closing} = 1;
 			$connection->disconnect;
 			$session->{screenname} = $tlv{0x01};
 			$session->{email} = $tlv{0x11};
@@ -506,6 +507,11 @@ sub got_buddylist($$) {
 	$session->callback_signon_done() unless $session->{sent_done}++;
 
 	$connection->snac_put(family => 0x2, subtype => 0xB, data => pack("Ca*", length(normalize($session->screenname)), normalize($session->screenname)));
+
+	$connection->log_print(OSCAR_DBG_DEBUG, "Setting directory info.");
+	$connection->snac_put(family => 0x02, subtype => 0x09);
+
+	$connection->snac_put(family => 0x02, subtype => 0x0F);
 }
 
 1;
