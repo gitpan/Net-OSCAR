@@ -1,0 +1,53 @@
+--- #YAML:1.0
+name: Net-OSCAR
+version: 1.00
+license: perl
+distribution_type: module
+requires:
+  Digest::MD5: '>= 2.0'
+  Filter::Util::Call: '>= 1.0'
+  Scalar::Util: '>= 1.0'
+  perl: 5.004
+recommends: {}
+build_requires: {}
+conflicts: {}
+provides:
+  Net::OSCAR:
+    file: OSCAR.pm
+    version: 1.00
+  Net::OSCAR::Buddylist:
+    file: OSCAR/Buddylist.pm
+    version: 1.00
+  Net::OSCAR::Callbacks:
+    file: OSCAR/Callbacks.pm
+    version: 1.00
+  Net::OSCAR::Common:
+    file: OSCAR/Common.pm
+    version: 1.00
+  Net::OSCAR::Connection:
+    file: OSCAR/Connection.pm
+    version: 1.00
+  Net::OSCAR::Connection::Chat:
+    file: OSCAR/Connection/Chat.pm
+    version: 1.00
+  Net::OSCAR::Constants:
+    file: OSCAR/Constants.pm
+    version: 1.00
+  Net::OSCAR::OldPerl:
+    file: OSCAR/OldPerl.pm
+  Net::OSCAR::Proxy:
+    file: OSCAR/Proxy.pm
+    version: 1.00
+  Net::OSCAR::Screenname:
+    file: OSCAR/Screenname.pm
+    version: 1.00
+  Net::OSCAR::TLV:
+    file: OSCAR/TLV.pm
+    version: 1.00
+  Net::OSCAR::Utility:
+    file: OSCAR/Utility.pm
+    version: 1.00
+  Net::OSCAR::_BLInternal:
+    file: OSCAR/_BLInternal.pm
+    version: 1.00
+generated_by: Module::Build version 0.21

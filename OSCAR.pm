@@ -1,6 +1,7 @@
 package Net::OSCAR;
 
-$VERSION = '0.62';
+$VERSION = '1.00';
+$REVISION = '$Revision: 1.146.4.15 $';
 
 =head1 NAME
 
@@ -21,12 +22,15 @@ Net::OSCAR - Implementation of AOL's OSCAR protocol for instant messaging
 
 =head1 INSTALLATION
 
-	perl Makefile.PL
-	make
-	make test
-	make install
-
-See C<perlmodinstall> for details.
+	perl Build.PL
+	perl Build
+	perl Build test
+	perl Build install
+                                                                                                      
+See C<perldoc Module::Build> for details.
+Note that this requires that you have the perl module Module::Build installed.
+If you don't, the traditional C<perl Makefile.PL ; make ; make test ; make install>
+should still work.
 
 =head1 DEPENDENCIES
 
@@ -102,14 +106,16 @@ C<fileno($connection-E<gt>get_filehandle)> inside of the L<"connection_changed">
 and then calling C<@handles = $poll-E<gt>handles(POLLIN | POLLOUT | POLLERR | POLLHUP)>
 and walking through the handles.
 
+For optimum performance, use the L<"connection_changed"> callback.
 
 =head1 FUNCTIONALITY
 
-C<Net::OSCAR> pretends to be WinAIM 4.7.2480.  It supports remote buddylists
-including permit and deny settings.  It also supports chat.  At the present
-time, setting and retrieving of directory information is not supported; nor
-are email privacy settings, buddy icons, voice chat, stock ticker, and
-many other of the official AOL Instant Messenger client's features.
+C<Net::OSCAR> pretends to be WinAIM 5.2.3292.  It supports remote buddylists
+including permit and deny settings.  It also supports chat, buddy icons,
+and extended status messages.  At the present time, setting and retrieving of
+directory information is not supported; nor are email privacy settings,
+voice chat, stock ticker, file transfer, direct IM, and many other of the
+official AOL Instant Messenger client's features.
 
 =head1 TERMINOLOGY/METHODOLOGY
 
@@ -137,16 +143,20 @@ everyone on our buddylist.
 =cut
 
 use strict;
-use vars qw($VERSION @ISA @EXPORT_OK %EXPORT_TAGS);
+use vars qw($VERSION $REVISION @ISA @EXPORT_OK %EXPORT_TAGS);
 use Carp;
 use Scalar::Util;
+use Digest::MD5 qw(md5);
+use Socket;
 use Net::OSCAR::Common qw(:all);
+use Net::OSCAR::Constants;
+use Net::OSCAR::Utility;
 use Net::OSCAR::Connection;
+use Net::OSCAR::Connection::Chat;
 use Net::OSCAR::Callbacks;
 use Net::OSCAR::TLV;
 use Net::OSCAR::Buddylist;
 use Net::OSCAR::Screenname;
-use Net::OSCAR::Chat;
 use Net::OSCAR::_BLInternal;
 use Net::OSCAR::OldPerl;
 
@@ -157,26 +167,79 @@ require Exporter;
 
 =pod
 
-=item new
+=item new ([capabilities => CAPABILITIES])
 
-Creates a new C<Net::OSCAR> object.
+Creates a new C<Net::OSCAR> object.  You may optionally
+pass a hash to set some parameters for the object.
+
+=over 4
+
+=item capabilities
+
+A listref of optional features that your client supports.
+Valid capabilities are:
+
+=over 4
+
+=item extended_status
+
+iChat-style extended status messages
+
+=item buddy_icons
+
+=item file_transfer
+
+=item file_sharing
+
+=item typing_status
+
+Typing status notification
+
+=back
+
+=back
+
+	$oscar = Net::OSCAR->new(capabilities => [qw(extended_status typing_status)]);
 
 =cut
 
 sub new($) {
 	my $class = ref($_[0]) || $_[0] || "Net::OSCAR";
 	shift;
-	my $self = { };
+
+	my $self = {
+		options => {},
+		_parameters => [@_]
+	};
 	bless $self, $class;
+
+	my(%parameters) = @_;
+	if(my($badparam) = grep { $_ ne "capabilities" } keys %parameters) {
+		croak "Invalid parameter '$badparam' passed to Net::OSCAR::new.";
+	}
+	if($parameters{capabilities}) {
+		if(my($badcap) = grep { $_ ne "extended_status" and $_ ne "buddy_icons" and $_ ne "file_transfer" and $_ ne "file_sharing" and $_ ne "typing_status" } @{$parameters{capabilities}}) {
+			croak "Invalid capability '$badcap' passed to Net::OSCAR::new.";
+		}
+	}
+
 	$self->{LOGLEVEL} = 0;
 	$self->{SNDEBUG} = 0;
 	$self->{description} = "OSCAR session";
+	$self->{userinfo} = bltie;
+	$self->{services} = tlv;
+	$self->{svcqueues} = tlv;
+	$self->{listener} = undef;
 
 	$self->{timeout} = 0.01;
+	$self->{capabilities} = {};
+
+	if($parameters{capabilities}) {
+		$self->{capabilities}->{$_} = 1 foreach @{$parameters{capabilities}};
+	}
 
 	return $self;
 }
-
 
 =pod
 
@@ -218,28 +281,35 @@ Screenname and password are mandatory.  The other keys are optional.
 In the special case of password being present but undefined, the
 auth_challenge callback will be used - see L<"auth_challenge"> for details.
 
+=item local_ip
+
+If you have more than one IP address with a route to the internet, this
+parameter can be used to specify which to use as the source IP for outgoing
+connections.
+
 =item host
 
 =item port
 
+=item proxy_type
+
+Either "SOCKS4", "SOCKS5", "HTTP", or HTTPS.  This and C<proxy_host> must be specified if you wish to use a proxy.
+C<proxy_port>, C<proxy_username>, C<proxy_password> are optional.  Note that proxy support
+is considered experimental.  You will need to have the C<Net::SOCKS> module installed for
+SOCKS proxying or the C<LWP::UserAgent> module installed for HTTP proxying.
+
+=item proxy_host
+
+=item proxy_port
+
+=item proxy_username
+
+=item proxy_password
+
 =back
 
-There are some other data that can be passed to this method.
-These data are used to sign on to an OSCAR-using service other than the default of
-AOL Instant Messenger, such as ICQ.  You should not attempt to specify
-these data directly - instead, use one of the following constants:
-
-=over 4
-
-=item OSCAR_SVC_AIM
-
-=item OSCAR_SVC_ICQ
-
-=back
-
-Example of signing on to ICQ:
-
-	$oscar->signon(screenname => "123456", password => "password", OSCAR_SVC_ICQ);
+If the screenname is all-numeric, it will automatically be treated
+as an ICQ UIN instead of an AIM screenname.
 
 =cut
 
@@ -251,20 +321,21 @@ sub signon($@) {
 	# Note that this breaks if caller passes in both a host and a port using the old way.
 	# But hey, that's why it's deprecated!
 	if(@_ < 3) {
-		$args{screenname} = shift @_ or return $self->crapout($self->{bos}, "You must specify a username to sign on with!");
-		$args{password} = shift @_ or return $self->crapout($self->{bos}, "You must specify a password to sign on with!");;
+		$args{screenname} = shift @_ or return $self->crapout($self->{services}->{CONNTYPE_BOS()}, "You must specify a username to sign on with!");
+		$args{password} = shift @_ or return $self->crapout($self->{services}->{CONNTYPE_BOS()}, "You must specify a password to sign on with!");;
 		$args{host} = shift @_ if @_;
 		$args{port} = shift @_ if @_;
 	} else {
 		%args = @_;
-		return $self->crapout($self->{bos}, "You must specify a username and password to sign on with!") unless $args{screenname} and exists($args{password});
+		return $self->crapout($self->{services}->{CONNTYPE_BOS()}, "You must specify a username and password to sign on with!") unless $args{screenname} and exists($args{password});
 	}
 
 	my %defaults = OSCAR_SVC_AIM;
+	%defaults = OSCAR_SVC_ICQ if $args{screenname} =~ /^\d+$/;
 	foreach my $key(keys %defaults) {
 		$args{$key} ||= $defaults{$key};
 	}
-	return $self->crapout($self->{bos}, "MD5 authentication not available for this service (you must define a password.)") if !defined($args{password}) and $args{hashlogin};
+	return $self->crapout($self->{services}->{CONNTYPE_BOS()}, "MD5 authentication not available for this service (you must define a password.)") if !defined($args{password}) and $args{hashlogin};
 	$self->{screenname} = new Net::OSCAR::Screenname $args{screenname};
 
 	# We set BOS to the login connection so that our error handlers pick up errors on this connection as fatal.
@@ -272,11 +343,32 @@ sub signon($@) {
 	$args{port} ||= 5190;
 
 
-	($self->{screenname}, $password, $host, $self->{port}) =
-		delete @args{qw(screenname password host port)};
+	($self->{screenname}, $password, $host, $self->{port},
+		$self->{proxy_type}, $self->{proxy_host}, $self->{proxy_port},
+		$self->{proxy_username}, $self->{proxy_password}, $self->{local_ip}) =
+			delete @args{qw(screenname password host port proxy_type proxy_host proxy_port proxy_username proxy_password local_ip)};
 
 	$self->{svcdata} = \%args;
-	$self->{bos} = $self->addconn($password, CONNTYPE_LOGIN, "login", $host);
+
+	if(defined($self->{proxy_type})) {
+		$self->{proxy_type} = uc($self->{proxy_type});
+		die "You must specify proxy_host if proxy_type is specified!\n" unless $self->{proxy_host};
+		if($self->{proxy_type} eq "HTTP" or $self->{proxy_type} eq "HTTPS") {
+			$self->{http_proxy} = LWP::UserAgent->new(
+				agent => "Mozilla/4.08 [en] (WinNT; U ;Nav)",
+				keep_alive => 1,
+				timeout => 30,
+			);
+			die "HTTPS not supported by your LWP::UserAgent\n" if $self->{proxy_type} eq "HTTPS" and !$self->{http_proxy}->is_protocol_supported("https");
+
+			my $proxyurl = lc($self->{proxy_type}) . "://$self->{proxy_host}";
+			$proxyurl .= ":$self->{proxy_port}" if $self->{proxy_port};
+			$proxyurl .= "/";
+			$self->{http_proxy}->proxy('http', $proxyurl);
+		}
+	}
+
+	$self->{services}->{CONNTYPE_BOS()} = $self->addconn(auth => $password, conntype => CONNTYPE_LOGIN, description => "login", peer => $host);
 }
 
 =pod
@@ -292,7 +384,7 @@ sub auth_response($$) {
 	my($self, $digest) = @_;
 	$self->log_print(OSCAR_DBG_SIGNON, "Got authentication response - proceeding with signon");
 	$self->{auth_response} = $digest;
-	$self->{bos}->snac_put(family => 0x17, subtype => 0x2, data => tlv(signon_tlv($self)));
+	$self->svcdo(CONNTYPE_BOS, family => 0x17, subtype => 0x2, data => tlv(signon_tlv($self)));
 }
 
 =pod
@@ -334,20 +426,27 @@ sub loglevel($;$$) {
 	$self->{SNDEBUG} = shift if @_;
 }
 
-sub addconn($$$$$) {
+sub addconn($@) {
 	my $self = shift;
-	my $conntype = $_[1];
+	my %data = @_;
 
-	my $connection = ($conntype == CONNTYPE_CHAT) ? Net::OSCAR::Chat->new($self, @_) : Net::OSCAR::Connection->new($self, @_);
-	if($_[1] == CONNTYPE_BOS) {
-		$self->{bos} = $connection;
-	} elsif($_[1] == CONNTYPE_ADMIN) {
-		$self->{admin} = 1; # We're not quite ready yet - add to queue but don't send svcreq
-	} elsif($_[1] == CONNTYPE_CHATNAV) {
-		$self->{chatnav} = 1;
+	$data{session} = $self;
+	my $connection;
+	my $conntype = $data{conntype};
+	if($conntype == CONNTYPE_CHAT) {
+		$connection = Net::OSCAR::Connection::Chat->new(%data);
+	} else {
+		$connection = Net::OSCAR::Connection->new(%data);
+		# We set the connection to 1 to indicate that it is in progress but not ready for SNAC-sending yet.
+		$self->{services}->{$conntype} = 1 unless $conntype == CONNTYPE_CHAT;
 	}
+
+	if($conntype == CONNTYPE_BOS) {
+		$self->{services}->{$conntype} = $connection;
+	}
+
 	push @{$self->{connections}}, $connection;
-	$self->callback_connection_changed($connection, "write");
+	$self->callback_connection_changed($connection, $connection->{state});
 	return $connection;
 }
 
@@ -366,16 +465,17 @@ sub delconn($$) {
 				close $connection->{socket} if $connection->{socket};
 			};
 		} else {
+			delete $self->{services}->{$connection->{conntype}} unless $connection->{conntype} == CONNTYPE_CHAT;
+
 			if($connection->{conntype} == CONNTYPE_BOS or ($connection->{conntype} == CONNTYPE_LOGIN and !$connection->{closing})) {
 				delete $connection->{socket};
 				return $self->crapout($connection, "Lost connection to BOS");
-			} elsif($connection->{conntype} == CONNTYPE_CHATNAV) {
-				delete $self->{chatnav};
 			} elsif($connection->{conntype} == CONNTYPE_ADMIN) {
-				delete $self->{admin};
 				$self->callback_admin_error("all", ADMIN_ERROR_CONNREF, undef) if scalar(keys(%{$self->{adminreq}}));
 			} elsif($connection->{conntype} == CONNTYPE_CHAT) {
 				$self->callback_chat_closed($connection, "Lost connection to chat");
+			} else {
+				$self->log_print(OSCAR_DBG_NOTICE, "Closing connection ", $connection->{conntype});
 			}
 		}
 		delete $connection->{socket};
@@ -543,16 +643,30 @@ sub findbuddy_byid($$$) {
 
 sub newid($;$) {
 	my($self, $group) = @_;
-	my $id = 0;
+	my $id = 4;
 	my %ids = ();
 
 	if($group) {
 		%ids = map { $_->{buddyid} => 1 } values %$group;
-		do { ++$id; } while($ids{$id});
+		do { ++$id; } while($ids{$id}) and $id < 4;
 	} else {
 		do { $id = ++$self->{nextid}->{__GROUPID__}; } while($self->findgroup($id));
 	}
 	return $id;
+}
+
+sub capabilities($) {
+	my $self = shift;
+
+	my $caps;
+
+	$caps = OSCAR_CAPS()->{chat}->{value} . OSCAR_CAPS()->{interoperate}->{value};
+	$caps .= OSCAR_CAPS()->{extstatus}->{value} if $self->{capabilities}->{extended_status};
+	$caps .= OSCAR_CAPS()->{buddyicon}->{value} if $self->{capabilities}->{buddy_icons};
+	$caps .= OSCAR_CAPS()->{filexfer}->{value} if $self->{capabilities}->{file_transfer};
+	$caps .= OSCAR_CAPS()->{fileshare}->{value} if $self->{capabilities}->{file_sharing};
+
+	return $caps;
 }
 
 =pod
@@ -562,7 +676,9 @@ sub newid($;$) {
 Sends your modified buddylist to the OSCAR server.  Changes to the buddylist
 won't actually take effect until this method is called.  Methods that change
 the buddylist have a warning about needing to call this method in their
-documentation.
+documentation.  After calling this method, your program B<MUST> not call
+it again until either the L<buddylist_ok> or L<buddylist_error> callbacks
+are received.
 
 =item rollback_buddylist
 
@@ -613,6 +729,12 @@ sub commit_buddylist($) {
 	Net::OSCAR::_BLInternal::NO_to_BLI($self);
 }
 
+sub rollback_buddylist($) {
+	my($self) = shift;
+	return must_be_on($self) unless $self->{is_on};
+	Net::OSCAR::_BLInternal::BLI_to_NO($self);
+}
+
 sub reorder_groups($@) {
 	my $self = shift;
 	return must_be_on($self) unless $self->{is_on};
@@ -655,7 +777,7 @@ See L<add_buddy>.
 sub rename_group($$$) {
 	my($self, $oldgroup, $newgroup) = @_;
 	return must_be_on($self) unless $self->{is_on};
-	return send_error($self, $self->{bos}, 0, "That group does not exist", 0) unless exists $self->{buddies}->{$oldgroup};
+	return send_error($self, $self->{services}->{CONNTYPE_BOS()}, 0, "That group does not exist", 0) unless exists $self->{buddies}->{$oldgroup};
 	$self->{buddies}->{$newgroup} = $self->{buddies}->{$oldgroup};
 	delete $self->{buddies}->{$oldgroup};
 }
@@ -825,7 +947,7 @@ sub mod_permit($$$@) {
 	if($action == MODBL_ACTION_ADD) {
 		foreach my $buddy(@buddies) {
 			next if exists($self->{$group}->{$buddy});
-			$self->{$group}->{$buddy}->{buddyid} = $self->newid($self->{group});
+			$self->{$group}->{$buddy}->{buddyid} = $self->newid($self->{$group});
 		}
 	} else {
 		foreach my $buddy(@buddies) {
@@ -845,7 +967,7 @@ sub mod_buddylist($$$$;@) {
 		$self->{buddies}->{$group} = {
 			groupid => $self->newid(),
 			members => bltie,
-			data => tlvtie
+			data => tlv
 		};
 	} elsif($what == MODBL_WHAT_GROUP and $action == MODBL_ACTION_DEL) {
 		return unless exists $self->{buddies}->{$group};
@@ -857,9 +979,10 @@ sub mod_buddylist($$$$;@) {
 		foreach my $buddy(@buddies) {
 			$self->{buddies}->{$group}->{members}->{$buddy} = {
 				buddyid => $self->newid($self->{buddies}->{$group}->{members}),
-				data => tlvtie,
+				data => tlv,
 				online => 0,
-				comment => undef
+				comment => undef,
+				alias => undef
 			};
 		}
 	} elsif($what == MODBL_WHAT_BUDDY and $action == MODBL_ACTION_DEL) {
@@ -895,11 +1018,49 @@ sub extract_userinfo($$) {
 	$retval->{pay} = $flags & 0x8;
 	$retval->{free} = $flags & 0x10;
 	$retval->{away} = $flags & 0x20;
+	$retval->{mobile} = $flags & 0x80;
 
 	($retval->{membersince}) = unpack("N", $tlv->{2}) if exists($tlv->{2});
 	($retval->{onsince}) = unpack("N", $tlv->{3}) if exists($tlv->{3});
-	($retval->{idle}) = unpack("n", $tlv->{4}) if exists($tlv->{4});
-	($retval->{capabilities}) = $tlv->{0xD} if exists($tlv->{0xD});
+	($retval->{idle}) = unpack("n", $tlv->{4})*60 if exists($tlv->{4});
+	if(exists($tlv->{0xD})) {
+		$self->log_print(OSCAR_DBG_DEBUG, "Got capabilities block.");
+		$retval->{capabilities} = {};
+		while($tlv->{0xD}) {
+			$self->log_print(OSCAR_DBG_DEBUG, "Got a capability.");
+			my $capability = substr($tlv->{0xD}, 0, 16, "");
+			if(OSCAR_CAPS_INVERSE()->{$capability}) {
+				my $capname = OSCAR_CAPS_INVERSE()->{$capability};
+				$self->log_print(OSCAR_DBG_DEBUG, "Got capability $capname.");
+				$retval->{capabilities}->{$capname} = OSCAR_CAPS()->{$capname}->{description};
+			} else {
+				$self->log_print(OSCAR_DBG_INFO, "Unknown capability: ", hexdump($capability));
+			}
+		}
+	}
+		
+
+	# Extended status information (iChat)
+	if(exists($tlv->{0x1D})) {
+		my $statinfo = $tlv->{0x1D};
+		while($statinfo) {
+			my($subtype, $number, $length) = unpack("nCC", substr($statinfo, 0, 4, ""));
+			my($subdata) = substr($statinfo, 0, $length, "");
+
+			if($subtype == 0x02) {
+				my($msglen) = unpack("n", substr($subdata, 0, 2, ""));
+				$retval->{extended_status} = substr($subdata, 0, $msglen, "");
+			} elsif($subtype == 0x01 and $number == 1) {
+				my($icon_md5sum) = $subdata;
+				if(!exists($self->{userinfo}->{$retval->{screenname}})
+				   or !exists($self->{userinfo}->{$retval->{screenname}}->{icon_md5sum})
+				   or $self->{userinfo}->{$retval->{screenname}}->{icon_md5sum} ne $icon_md5sum) {
+					$retval->{icon_md5sum} = $icon_md5sum;
+					$self->callback_new_buddy_icon($retval->{screenname}, $retval);
+				}
+			}
+		}
+	}
 
 	substr($data, 0, $chainlen) = "";
 
@@ -928,19 +1089,15 @@ their profile.
 
 =cut
 
-sub get_info($$) {
-	my($self, $screenname) = @_;
+sub get_info($$;$) {
+	my($self, $screenname, $type) = @_;
 	return must_be_on($self) unless $self->{is_on};
 
-	$self->{bos}->snac_put(reqdata => $screenname, family => 0x2, subtype => 0x5, data => pack("nCa*", 1, length($screenname), $screenname));
+	$type ||= 1;
+	$self->svcdo(CONNTYPE_BOS, reqdata => $screenname, family => 0x2, subtype => 0x15, data => pack("nnCa*", 0, $type, length($screenname), $screenname));
 }
 
-sub get_away($$) {
-	my($self, $screenname) = @_;
-	return must_be_on($self) unless $self->{is_on};
-
-	$self->{bos}->snac_put(reqdata => $screenname, family => 0x2, subtype => 0x5, data => pack("nCa*", 3, length($screenname), $screenname));
-}
+sub get_away($$) { shift->get_info(@_, 3); }
 
 =pod
 
@@ -956,8 +1113,8 @@ If the message was too long to send, returns zero.
 
 =cut
 
-sub send_im($$$;$) {
-	my($self, $to, $msg, $away) = @_;
+sub send_im($$$;$;) {
+	my($self, $to, $msg, $away, $channel) = @_;
 	return must_be_on($self) unless $self->{is_on};
 	my $packet = "";
 	my $reqid = (8<<16) | (unpack("n", randchars(2)))[0];
@@ -969,20 +1126,83 @@ sub send_im($$$;$) {
 	}
 
 	$packet = randchars(8);
-	$packet .= pack("n", 1); # channel
+	$channel ||= 1;
+	$packet .= pack("n", $channel);
 	$packet .= pack("Ca*", length($to), $to);
 
-	$packet .= tlv(2 => pack("n3 C n C n3 a*", 0x501, 4, 0x101, 1, 0x201, 1, length($msg)+4, 0, 0, $msg));
+	my $flags2 = 0;
 
-	if($away) {
-		$packet .= tlv(4 => "");
+	if($channel == 1) {
+		$packet .= tlv_encode(tlv(2 => pack("n3 C n C n3 a*", 0x501, 4, 0x101, 1, 0x201, 1, length($msg)+4, 0, 0, $msg)));
+
+		if($away) {
+			$packet .= tlv_encode(tlv(4 => ""));
+		} else {
+			$packet .= tlv_encode(tlv(3 => "")); #request server confirmation
+		}
+
+		if($self->{capabilities}->{buddy_icons} and $self->{icon_checksum} and $self->{icon_timestamp} and
+			(!exists($self->{userinfo}->{$to}) or
+			!exists($self->{userinfo}->{to}->{icon_timestamp_received}) or
+			$self->{icon_timestamp} > $self->{userinfo}->{$to}->{icon_timestamp_received})
+		) {
+
+			$self->log_print(OSCAR_DBG_DEBUG, "Informing $to about our buddy icon.");
+			$self->{userinfo}->{$to} ||= {};
+			$self->{userinfo}->{$to}->{icon_timestamp_received} = $self->{icon_timestamp};
+			$packet .= tlv_encode(tlv(8 => pack("NnnN", $self->{icon_length}, 1, $self->{icon_checksum}, $self->{icon_timestamp})));
+		}
+
+		$flags2 = 0xB if $self->{capabilities}->{typing_status};
 	} else {
-		$packet .= tlv(3 => ""); #request server confirmation
+		$packet .= $msg;
 	}
 
-	$self->{bos}->snac_put(reqid => $reqid, reqdata => $to, family => 0x4, subtype => 0x6, data => $packet);
+	$self->svcdo(CONNTYPE_BOS, reqid => $reqid, reqdata => $to, family => 0x4, subtype => 0x6, data => $packet, flags2 => $flags2);
 	return $reqid;
 }
+
+=pod
+
+=item send_typing_status (RECIPIENT, STATUS)
+
+Send a typing status change to another user.  Send these messages
+to implement typing status notification.  Valid values for C<STATUS> are:
+
+=over 4
+
+=item *
+
+TYPINGSTATUS_STARTED: The user has started typing to the recipient.
+This indicates that typing is actively taking place.
+
+=item *
+
+TYPINGSTATUS_TYPING: The user is typing to the recipient.  This
+indicates that there is text in the message input area, but
+typing is not actively taking place at the moment.
+
+=item *
+
+TYPINGSTATUS_FINISHED: The user has finished typing to the recipient.
+This should be sent when the user starts to compose a message, but
+then erases all of the text in the message input area.
+
+=back
+
+=cut
+
+sub send_typing_status($$$) {
+	my($self, $recipient, $status) = @_;
+
+	croak "This client does not support typing status notifications." unless $self->{capabilities}->{typing_status};
+	return unless exists $self->{userinfo}->{$recipient} and $self->{userinfo}->{$recipient}->{typing_status};
+
+	$self->svcdo(CONNTYPE_BOS, family => 0x4, subtype => 0x14, data =>
+		pack("NNnCa*", 0, 0, 1, length($recipient), $recipient) . pack("n", $status)
+	);
+}
+
 
 =pod
 
@@ -1002,13 +1222,11 @@ sub buddyhash($) { bltie; }
 
 sub im_parse($$) {
 	my($self, $data) = @_;
-	my($from, $msg, $away) = ("", "", 0);
-	my $chat = undef;
-	my $chaturl = undef;
+	my(%im_data) = (from => "", msg => "", away => 0);
 
 	my $cookie = substr($data, 0, 8, ""); #OSCAR is so nice, it feeds us BLTs and cookies as SNACs.
 	my($channel) = unpack("n", substr($data, 0, 2, ""));
-	if($channel != 1 and $channel != 2) {
+	if($channel != 1 and $channel != 2 and $channel != 3) {
 		carp "Got ICBM on unsupported channel $channel - ignoring.";
 		return;
 	} else {
@@ -1017,52 +1235,75 @@ sub im_parse($$) {
 
 	$self->log_print(OSCAR_DBG_DEBUG, "Extracting user info.");
 	my ($senderinfo, $tlvlen) = $self->extract_userinfo($data);
-	$from = $senderinfo->{screenname};
+	$im_data{from} = $senderinfo->{screenname};
 
 	# Copying gAIM/libfaim is *so* much easier than understanding stuff.
 	if($channel == 1) {
+		my $typing_status = 0;
+
 		substr($data, 0, $tlvlen) = "";
 		$self->log_print(OSCAR_DBG_DEBUG, "Decoding ICBM secondary TLV.");
 
 		my $tlv = tlv_decode($data);
-		$msg = $tlv->{2};
+		$im_data{msg} = $tlv->{2};
 
-		substr($msg, 0, 2) = "";
-		my($y) = unpack("n", substr($msg, 0, 2, ""));
-		substr($msg, 0, $y+2) = "";
+		substr($im_data{msg}, 0, 2) = "";
+		my($y) = unpack("n", substr($im_data{msg}, 0, 2, ""));
+		substr($im_data{msg}, 0, $y+2) = "";
 
-		my($msglen, $flags1, $flags2) = unpack("nnn", substr($msg, 0, 6, ""));
+		my($msglen, $flags1, $flags2) = unpack("nnn", substr($im_data{msg}, 0, 6, ""));
 		$msglen -= 4;
 
-		$away = 1 if exists $tlv->{4};
-		if($tlv->{3}) { # server ack requested
-			#$self->log_print(OSCAR_DBG_DEBUG, "Sending message ack.");
-			#$self->{bos}->snac_put(family => 0x4, subtype => 0xC, data =>
-			#	$cookie . pack("nCa*", 1, length($from), $from)
-			#);
+		$im_data{away} = 1 if exists $tlv->{4};
+
+		# Sender supports typing status notification
+		$self->{userinfo}->{$im_data{from}} ||= {};
+		if(exists($tlv->{0xB})) {
+			$self->{userinfo}->{$im_data{from}}->{typing_status} = 1;
+		} else {
+			delete $self->{userinfo}->{$im_data{from}}->{typing_status};
 		}
-	} else {
+
+		if($tlv->{8} and $self->{capabilities}->{buddy_icons}) { # user has buddy icon
+			my($icon_length, $icon_checksum, $icon_timestamp) = unpack("NxxnN", $tlv->{8});
+			my $new_icon = 0;
+
+			if(!exists($self->{userinfo}->{$im_data{from}}->{icon_timestamp})
+			   or $icon_timestamp > $self->{userinfo}->{$im_data{from}}->{icon_timestamp}
+			   or $icon_checksum != $self->{userinfo}->{$im_data{from}}->{icon_checksum}) {
+				$new_icon = 1;
+			}
+
+			($self->{userinfo}->{$im_data{from}}->{icon_length}, $self->{userinfo}->{$im_data{from}}->{icon_checksum}, $self->{userinfo}->{$im_data{from}}->{icon_timestamp}) =
+				($icon_length, $icon_checksum, $icon_timestamp);
+
+			$self->callback_new_buddy_icon($im_data{from}, $self->{userinfo}->{$im_data{from}});
+		}
+	} elsif($channel == 2) {
+		substr($data, 0, $tlvlen) = "";
+		my $tlv = tlv_decode($data);
+		
+	} elsif($channel == 3) {
 		$data = $senderinfo->{chatdata};
-		$away = 0;
 
 		substr($data, 0, 26) = "";
 		my $tlv = tlv_decode($data);
-		$msg = $tlv->{0xC};
+		$im_data{msg} = $tlv->{0xC};
 		if($tlv->{0x2711}) {
-			($chaturl) = unpack("xx C/a*", $tlv->{0x2711});
+			($im_data{chaturl}) = unpack("xx C/a*", $tlv->{0x2711});
 
-			$chaturl =~ /-.*?-(.*)/;
-			$chat = $1;
-			$chat =~ s/%([0-9A-Z]{1,2})/chr(hex($1))/eig;
+			$im_data{chaturl} =~ /-.*?-(.*)/;
+			$im_data{chat} = $1;
+			$im_data{chat} =~ s/%([0-9A-Z]{1,2})/chr(hex($1))/eig;
 		}
 
-		$self->{chatinvites}->{$chaturl} = {
+		$self->{chatinvites}->{$im_data{chaturl}} = {
 			cookie => $cookie,
-			sender => $from
+			sender => $im_data{from}
 		};
 	}
 
-	return ($from, $msg, $away, $chat, $chaturl);
+	return %im_data;
 }
 
 =pod
@@ -1084,27 +1325,16 @@ sub evil($$;$) {
 	my($self, $who, $anon) = @_;
 	return must_be_on($self) unless $self->{is_on};
 
-	$self->{bos}->snac_put(reqdata => $who, family => 0x04, subtype => 0x08, data =>
+	$self->svcdo(CONNTYPE_BOS, reqdata => $who, family => 0x04, subtype => 0x08, data =>
 		pack("n C a*", ($anon ? 1 : 0), length($who), $who)
 	);
-}
-
-sub capabilities($) {
-	my $self = shift;
-	my $caps;
-
-	#AIM_CAPS_CHAT
-	$caps .= pack("C*", map{hex($_)} split(/[ \t\n]+/,
-		"74 8F 24 20  62 87 11 D1   82 22 44 45  53 54 00 00"));	
-
-	return $caps;
 }
 
 =pod
 
 =item set_away (MESSAGE)
 
-Set's the users away message, also marking them as being away.
+Sets the user's away message, also marking them as being away.
 If the message is undef or the empty string, the user will be
 marked as no longer being away.
 
@@ -1118,50 +1348,180 @@ sub set_away($$) {
 
 =pod
 
+=item set_extended_status (MESSAGE)
+
+Sets the user's extended status message.  This requires the
+C<Net::OSCAR> object to have been created with the C<extended_status>
+capability.  Currently, the only clients which support extended
+status messages are Net::OSCAR, Gaim, and iChat.  If the message
+is undef or the empty string, the user's extended status
+message will be cleared.
+
+=cut
+
+sub set_extended_status($$) {
+	my($self, $status) = @_;
+	croak "This client does not support extended status messages." unless $self->{capabilities}->{extended_status};
+
+	$status ||= "";
+	my $message = pack("na*n", length($status), $status, 0);
+
+	$self->log_print(OSCAR_DBG_NOTICE, "Setting extended status.");
+	$self->svcdo(CONNTYPE_BOS, family => 0x01, subtype => 0x1E, data => tlv_encode(tlv(0x1D => pack("nCCa*", 2, 4, length($status) + 4, $message))));
+}
+
+=pod
+
 =item set_info (PROFILE)
 
 Sets the user's profile.  Call L<"commit_buddylist"> to have
 the new profile stored on the OSCAR server.
+
+Note that if the user's profile was previously set with Net::OSCAR,
+it will be stored in the server-side buddylist, and so this method will
+not have to be called every time the user signs on.  However, other clients
+do not store the profile on the server, so if the user previously
+set a profile with a non-Net::OSCAR-based client, this method will
+need to be called in order for the user's profile to be set.
+
+See the file C<PROTOCOL>, included with the C<Net::OSCAR> distribution,
+for details of how we're storing this data.
 
 =cut
 
 sub set_info($$;$) {
 	my($self, $profile, $awaymsg) = @_;
 
-	my %tlv;
-	tie %tlv, "Net::OSCAR::TLV";
+	return must_be_on($self) unless $self->{services}->{CONNTYPE_BOS()};
+
+	my $tlv = tlv;
 
 	if(defined($profile)) {
-		$tlv{0x1} = ENCODING;
-		$tlv{0x2} = $profile;
+		$tlv->{0x1} = ENCODING;
+		$tlv->{0x2} = $profile;
 		$self->{profile} = $profile;
 	}
 
 	if(defined($awaymsg)) {
-		$tlv{0x3} = ENCODING;
-		$tlv{0x4} = $awaymsg;
+		$tlv->{0x3} = ENCODING;
+		$tlv->{0x4} = $awaymsg;
 	}
 
-	$tlv{0x5} = $self->capabilities();
+	$tlv->{0x5} = $self->capabilities();
 
 	$self->log_print(OSCAR_DBG_NOTICE, "Setting user information.");
-	$self->{bos}->snac_put(family => 0x02, subtype => 0x04, data => tlv_encode(\%tlv));
+	$self->svcdo(CONNTYPE_BOS, family => 0x02, subtype => 0x04, data => tlv_encode($tlv));
 }
+
+=pod
+
+=item set_icon (ICONDATA)
+
+Sets the user's buddy icon.  The C<Net::OSCAR> object must have been created
+with the C<buddy_icons> capability to use this.  C<ICONDATA> must be less
+than 4kb, should be 48x48 pixels, and should be BMP, GIF, or JPEG image data.
+You must call L<commit_buddylist> for this change to take effect.  If
+C<ICONDATA> is the empty string, the user's buddy icon will be removed.
+
+When reading the icon data from a file, make sure to call C<binmode>
+on the file handle.
+
+Note that if the user's buddy icon was previously set with Net::OSCAR,
+enough data will be stored in the server-side buddylist that this will
+not have to be called every time the user signs on.  However, other clients
+do not store the extra data in the buddylist, so if the user previously
+set a buddy icon with a non-Net::OSCAR-based client, this method will
+need to be called in order for the user's buddy icon to be set properly.
+
+See the file C<PROTOCOL>, included with the C<Net::OSCAR> distribution,
+for details of how we're storing this data.
+
+You should receive a L<buddy_icon_uploaded> callback in response to this
+method.
+
+=cut
+
+sub set_icon($$) {
+	my($self, $icon) = @_;
+
+	carp "This client does not support buddy icons!" unless $self->{capabilities}->{buddy_icons};
+
+	if($icon) {
+		$self->{icon} = $icon;
+		$self->{icon_md5sum} = pack("n", 0x10) . md5($icon);
+		$self->{icon_checksum} = $self->icon_checksum($icon);
+		$self->{icon_timestamp} = time;
+		$self->{icon_length} = length($icon);
+	} else {
+		delete $self->{icon};
+		delete $self->{icon_md5sum};
+		delete $self->{icon_checksum};
+		delete $self->{icon_timestamp};
+		delete $self->{icon_length};
+	}
+}
+
+=pod
+
+=item get_icon (SCREENNAME, MD5SUM)
+
+Gets a user's buddy icon.  See L<set_icon> for details.  To make
+sure this method isn't called excessively, please check the
+C<icon_checksum> and C<icon_timestamp> data, which are available
+via the L<buddy> method (even for people not on the user's buddy
+list.)  The MD5 checksum of a user's icon will be in the
+C<icon_md5sum> key returned by L<buddy>.
+
+You should receive a L<buddy_icon_downloaded> callback in
+response to this method.
+
+=cut
+
+sub get_icon($$$) {
+	my($self, $screenname, $md5sum) = @_;
+
+	carp "This client does not support buddy icons!" unless $self->{capabilities}->{buddy_icons};
+
+	$self->svcdo(CONNTYPE_ICON, family => 0x10, subtype => 0x04, data => pack("Ca*CnCCa*",
+		length($screenname), $screenname, 1, 1, 1, length($md5sum), $md5sum
+	));
+}	
+
+=pod
+
+=item icon_checksum (ICONDATA)
+
+Returns a checksum of the buddy icon.  Use this in conjunction with the
+C<icon_checksum> buddy info key to cache buddy icons.
+
+=cut
+
+sub icon_checksum($$) {
+	my($self, $icon) = @_;
+
+	my $sum = 0;
+	my $i = 0;
+	for($i = 0; $i+1 < length($icon); $i += 2) {
+		$sum += (ord(substr($icon, $i+1, 1)) << 8) + ord(substr($icon, $i, 1));
+	}
+
+	$sum += ord(substr($icon, $i, 1)) if $i < length($icon);
+
+	$sum = (($sum & 0xFFFF0000) >> 16) + ($sum & 0x0000FFFF);
+
+	return $sum;
+}
+
+
 
 sub svcdo($$%) {
 	my($self, $service, %snac) = @_;
-	my $svcname = "";
-	if($service == CONNTYPE_ADMIN) {
-		$svcname = "admin";
-	} elsif($service == CONNTYPE_CHATNAV) {
-		$svcname = "chatnav";
-	}
 
-	if($self->{$svcname} and ref($self->{$svcname})) {
-		$self->{$svcname}->snac_put(%snac);
+	if($self->{services}->{$service} and ref($self->{services}->{$service})) {
+		$self->{services}->{$service}->snac_put(%snac);
 	} else {
-		push @{$self->{"${svcname}_queue"}}, \%snac;
-		$self->svcreq($service) unless $self->{$svcname};
+		push @{$self->{svcqueues}->{$service}}, \%snac;
+		$self->svcreq($service) unless $self->{services}->{$service};
 	}
 }
 
@@ -1169,7 +1529,7 @@ sub svcreq($$) {
         my($self, $svctype) = @_;
 
         $self->log_print(OSCAR_DBG_INFO, "Sending service request for servicetype $svctype.");
-        $self->{bos}->snac_put(family => 0x1, subtype => 0x4, data => pack("n", $svctype));
+        $self->svcdo(CONNTYPE_BOS, family => 0x1, subtype => 0x4, data => pack("n", $svctype));
 }
 
 =pod
@@ -1184,20 +1544,14 @@ sub change_password($$$) {
 	my($self, $currpass, $newpass) = @_;
 	return must_be_on($self) unless $self->{is_on};
 
-	if($self->{adminreq}->{ADMIN_TYPE_PASSWORD_CHANGE}++) {
+	if($self->{adminreq}->{0+ADMIN_TYPE_PASSWORD_CHANGE}) {
 		$self->callback_admin_error(ADMIN_TYPE_PASSWORD_CHANGE, ADMIN_ERROR_REQPENDING);
 		return;
+	} else {
+		$self->{adminreq}->{0+ADMIN_TYPE_PASSWORD_CHANGE}++;
 	}
 
-	my %tlv;
-	tie %tlv, "Net::OSCAR::TLV";
-
-	%tlv = (
-		0x02 => $newpass,
-		0x12 => $currpass
-	);
-
-	$self->svcdo(CONNTYPE_ADMIN, family => 0x07, subtype => 0x04, data => tlv_encode(\%tlv));
+	$self->svcdo(CONNTYPE_ADMIN, family => 0x07, subtype => 0x04, data => tlv_encode(tlv(0x02 => $newpass, 0x12 => $currpass)));
 }
 
 =pod
@@ -1214,10 +1568,13 @@ sub confirm_account($) {
 	my($self) = shift;
 	return must_be_on($self) unless $self->{is_on};
 
-	if($self->{adminreq}->{ADMIN_TYPE_ACCOUNT_CONFIRM}++) {
+	if($self->{adminreq}->{0+ADMIN_TYPE_ACCOUNT_CONFIRM}) {
 		$self->callback_admin_error(ADMIN_TYPE_ACCOUNT_CONFIRM, ADMIN_ERROR_REQPENDING);
 		return;
+	} else {
+		$self->{adminreq}->{0+ADMIN_TYPE_ACCOUNT_CONFIRM}++;
 	}
+
 	$self->svcdo(CONNTYPE_ADMIN, family => 0x07, subtype => 0x06);
 }
 
@@ -1240,11 +1597,14 @@ sub change_email($$) {
 	my($self, $newmail) = @_;
 	return must_be_on($self) unless $self->{is_on};
 
-	if($self->{adminreq}->{ADMIN_TYPE_EMAIL_CHANGE}++) {
+	if($self->{adminreq}->{0+ADMIN_TYPE_EMAIL_CHANGE}) {
 		$self->callback_admin_error(ADMIN_TYPE_EMAIL_CHANGE, ADMIN_ERROR_REQPENDING);
 		return;
+	} else {
+		$self->{adminreq}->{0+ADMIN_TYPE_EMAIL_CHANGE}++;
 	}
-	$self->svcdo(CONNTYPE_ADMIN, family => 0x07, subtype => 0x04, data => tlv(0x11 => $newmail));
+
+	$self->svcdo(CONNTYPE_ADMIN, family => 0x07, subtype => 0x04, data => tlv_encode(tlv(0x11 => $newmail)));
 }
 
 =pod
@@ -1261,11 +1621,14 @@ sub format_screenname($$) {
 	my($self, $newname) = @_;
 	return must_be_on($self) unless $self->{is_on};
 
-	if($self->{adminreq}->{ADMIN_TYPE_SCREENNAME_FORMAT}++) {
+	if($self->{adminreq}->{0+ADMIN_TYPE_SCREENNAME_FORMAT}) {
 		$self->callback_admin_error(ADMIN_TYPE_SCREENNAME_FORMAT, ADMIN_ERROR_REQPENDING);
 		return;
+	} else {
+		$self->{adminreq}->{0+ADMIN_TYPE_SCREENNAME_FORMAT}++;
 	}
-	$self->svcdo(CONNTYPE_ADMIN, family => 0x07, subtype => 0x04, data => tlv(1 => $newname));
+
+	$self->svcdo(CONNTYPE_ADMIN, family => 0x07, subtype => 0x04, data => tlv_encode(tlv(1 => $newname)));
 }
 
 =pod
@@ -1295,11 +1658,11 @@ sub chat_join($$; $) {
 
 		pack("n Ca*n2C a*", $exchange,
 			length("create"), "create", 0xFFFF, 0x100, 0x03,
-			tlv(
+			tlv_encode(tlv(
 				0xD7 => "en",
 				0xD6 => "us-ascii",
 				0xD3 => $name
-			)
+			))
 		)
 	);
 }
@@ -1336,7 +1699,7 @@ sub chat_decline($$) {
 		return;
 	};
 	$self->log_print(OSCAR_DBG_NOTICE, "Declining chat invite for $chat.");
-	$self->{bos}->snac_put(family => 0x04, subtype => 0x0B, data =>
+	$self->svcdo(CONNTYPE_BOS, family => 0x04, subtype => 0x0B, data =>
 		$invite->{cookie} .
 		pack("n", 2) .
 		pack("Ca*", length($invite->{sender}), $invite->{sender}) .
@@ -1352,7 +1715,7 @@ sub crapout($$$;$) {
 
 sub must_be_on($) {
 	my $self = shift;
-	send_error($self, $self->{bos}, 0, "You have not finished signing on.", 0);
+	send_error($self, $self->{services}->{CONNTYPE_BOS()}, 0, "You have not finished signing on.", 0);
 }
 
 =pod
@@ -1369,7 +1732,7 @@ the user as being idle.
 sub set_idle($$) {
 	my($self, $time) = @_;
 	return must_be_on($self) unless $self->{is_on};
-	$self->{bos}->snac_put(family => 0x1, subtype => 0x11, data => pack("N", $time));
+	$self->svcdo(CONNTYPE_BOS, family => 0x1, subtype => 0x11, data => pack("N", $time));
 }
 
 =pod
@@ -1386,9 +1749,9 @@ and then call the L<signon> method on the object returned by clone.
 
 sub clone($) {
 	my $self = shift;
-	my $clone = $self->new(); 	# Born in a science lab late one night
-					# Without a mother or a father
-					# Just a test tube and womb with a view...
+	my $clone = $self->new(@{$self->{_parameters}}); 	# Born in a science lab late one night
+								# Without a mother or a father
+								# Just a test tube and womb with a view...
 
 	# Okay, now we don't want to just copy the reference.
 	# If we did that, changing ourself would change the clone.
@@ -1466,6 +1829,17 @@ worry about the fact that it's case and whitespace insensitive when comparing it
 A user-defined comment associated with the buddy.  See L<"set_buddy_comment">.
 Note that this key will be present but undefined if there is no comment.
 
+=item alias
+
+A user-defined alias for the buddy.  See L<"set_buddy_alias">.
+Note that this key will be present but undefined if there is no alias.
+
+=item extended_status
+
+The user's extended status message, if one is set, will be in this key.
+This requires that you set the C<extended_status> capability when
+creating the C<Net::OSCAR> object.
+
 =item trial
 
 The user's account has trial status.
@@ -1486,6 +1860,36 @@ The user is away.
 
 The user is an administrator.
 
+=item mobile
+
+The user is using a mobile device.
+
+=item typing_status
+
+The user is known to support typing status notification.  We only find this out if they send us an IM.
+
+=item capabilities
+
+The user's capabilities.  This is a reference to a hash whose keys are the user's capabilities, and
+whose values are descriptions of their respective capabilities.
+
+=item icon
+
+The user's buddy icon, if available.
+
+=item icon_checksum
+
+The checksum time of the user's buddy icon, if available.  Use this, in conjunction with
+the L<icon_checksum> method, to cache buddy icons.
+
+=item icon_timestamp
+
+The modification timestamp of the user's buddy icon, if available.
+
+=item icon_length
+
+The length of the user's buddy icon, if available.
+
 =item membersince
 
 Time that the user's account was created, in the same format as the C<time> function.
@@ -1499,7 +1903,14 @@ Time that the user signed on to the service, in the same format as the C<time> f
 Time that the user has been idle for, in seconds.  If this key is present but zero,
 the user is not idle.  If this key is not present, the user is not reporting idle time.
 
+=item evil
+
+Evil (warning) level for the user.
+
 =back
+
+Some keys; namely, C<typing_status> and C<icon_checksum>, may be available for people
+who the user has communicated with but who are not on the user's buddylist.
 
 =item email
 
@@ -1527,8 +1938,8 @@ sub buddies($;$) {
 sub buddy($$;$) {
 	my($self, $buddy, $group) = @_;
 	$group ||= $self->findbuddy($buddy);
-	return undef unless $group;
-	return $self->{buddies}->{$group}->{members}->{$buddy};
+	return $self->{buddies}->{$group}->{members}->{$buddy} if $group;
+	return $self->{userinfo}->{$buddy} || undef;
 }
 sub email($) { return shift->{email}; }
 sub screenname($) { return shift->{screenname}; }
@@ -1538,9 +1949,14 @@ sub is_on($) { return shift->{is_on}; }
 
 =item set_buddy_comment (GROUP, BUDDY[, COMMENT])
 
-Set a brief comment about a buddy.  This can be used for things such
-as the buddy's real name.  You must call L<"commit_buddylist"> to save
+Set a brief comment about a buddy.  You must call L<"commit_buddylist"> to save
 the comment to the server.  If COMMENT is undefined, the comment is
+deleted.
+
+=item set_buddy_alias (GROUP, BUDDY[, ALIAS])
+
+Set an alias for a buddy.  You must call L<"commit_buddylist"> to save
+the comment to the server.  If ALIAS is undefined, the alias is
 deleted.
 
 =cut
@@ -1551,12 +1967,18 @@ sub set_buddy_comment($$$;$) {
 	$self->{buddies}->{$group}->{members}->{$buddy}->{comment} = $comment;
 }
 
+sub set_buddy_alias($$$;$) {
+	my($self, $group, $buddy, $alias) = @_;
+	return must_be_on($self) unless $self->{is_on};
+	$self->{buddies}->{$group}->{members}->{$buddy}->{alias} = $alias;
+}
+
 =pod
 
 =item chat_invite (CHAT, MESSAGE, WHO)
 
 Deprecated.  Provided for compatibility with C<Net::AIM>.
-Use the appropriate method of the C<Net::OSCAR::Chat> object
+Use the appropriate method of the C<Net::OSCAR::Connection::Chat> object
 instead.
 
 =cut
@@ -1572,13 +1994,13 @@ sub chat_invite($$$@) {
 =item chat_leave (CHAT)
 
 Deprecated.  Provided for compatibility with C<Net::AIM>.
-Use the appropriate method of the C<Net::OSCAR::Chat> object
+Use the appropriate method of the C<Net::OSCAR::Connection::Chat> object
 instead.
 
 =item chat_send (CHAT, MESSAGE)
 
 Deprecated.  Provided for compatibility with C<Net::AIM>.
-Use the appropriate method of the C<Net::OSCAR::Chat> object
+Use the appropriate method of the C<Net::OSCAR::Connection::Chat> object
 instead.
 
 =cut
@@ -1659,9 +2081,33 @@ information about the error.
 
 This is called when an administrative function succeeds.  See L<admin_error> for more info.
 
+=item new_buddy_icon (OSCAR, SCREENNAME, BUDDY DATA)
+
+This is called when someone, either someone the user is talking with or someone on
+their buddylist, has a potentially new buddy icon.  The buddy data is guaranteed
+to have at least C<icon_checksum> available; C<icon_timestamp> and C<icon_length>
+may not be.  Specifically, if C<Net::OSCAR> found out about the buddy icon
+through a buddy status update (the sort that triggers a L<buddy_in> callback),
+these data will B<not> be available; if C<Net::OSCAR> found out about the
+icon via an incoming IM from the person, these data B<will> be available.
+
+Upon receiving this callback, an application should use the C<icon_checksum>
+to search for the icon in its cache, and call L<get_icon> if it can't find it.
+If the C<icon_md5sum>, which is what needs to get passed to L<get_icon>, is not present 
+in the buddy data, use L<get_info> to request the information for the user,
+and then call L<get_icon> from the L<buddy_info> callback.
+
+=item buddy_icon_uploaded (OSCAR)
+
+This is called when the user's buddy icon is successfully uploaded to the server.
+
+=item buddy_icon_downloaded (OSCAR, SCREENNAME, ICONDATA)
+
+This is called when a user's buddy icon is successfully downloaded from the server.
+
 =item chat_closed (OSCAR, CHAT, ERROR)
 
-Your connection to CHAT (a C<Net::OSCAR::Chat> object) was severed due to ERROR.
+Your connection to CHAT (a C<Net::OSCAR::Connection::Chat> object) was severed due to ERROR.
 
 =item buddy_in (OSCAR, SCREENNAME, GROUP, BUDDY DATA)
 
@@ -1680,6 +2126,16 @@ Called when a buddy has signed off (or added us to their deny list.)
 =item chat_buddy_out (OSCAR, SCREENNAME, CHAT)
 
 Called when someone leaves a chatroom.
+
+=item typing_status (OSCAR, SCREENNAME, STATUS)
+
+Called when someone has sent us a typing status notification message.
+See L<send_typing_status> for a description of the different statuses.
+
+=item extended_status (OSCAR, STATUS)
+
+Called when the user's extended status changes.  This will normally
+be sent in response to a successful L<set_extended_status> call.
 
 =item im_ok (OSCAR, TO, REQID)
 
@@ -1702,12 +2158,12 @@ NOREFLECT parameter in L<chat_send>.
 
 Called when someone invites us into a chatroom.  MESSAGE is the message
 that they specified on the invitation.  CHAT is the name of the chatroom.
-CHATURL is a chat URL and not a C<Net::OSCAR::Chat> object.  CHATURL can
+CHATURL is a chat URL and not a C<Net::OSCAR::Connection::Chat> object.  CHATURL can
 be passed to the L<chat_accept> method to accept the invitation.
 
 =item chat_joined (OSCAR, CHATNAME, CHAT)
 
-Called when you enter a chatroom.  CHAT is the C<Net::OSCAR::Chat>
+Called when you enter a chatroom.  CHAT is the C<Net::OSCAR::Connection::Chat>
 object for the chatroom.
 
 =item evil (OSCAR, NEWEVIL[, FROM])
@@ -1836,9 +2292,14 @@ sub callback_buddylist_error(@) { do_callback("buddylist_error", @_); }
 sub callback_buddylist_ok(@) { do_callback("buddylist_ok", @_); }
 sub callback_admin_error(@) { do_callback("admin_error", @_); }
 sub callback_admin_ok(@) { do_callback("admin_ok", @_); }
+sub callback_new_buddy_icon(@) { do_callback("new_buddy_icon", @_); }
+sub callback_buddy_icon_uploaded(@) { do_callback("buddy_icon_uploaded", @_); }
+sub callback_buddy_icon_downloaded(@) { do_callback("buddy_icon_downloaded", @_); }
 sub callback_rate_alert(@) { do_callback("rate_alert", @_); }
 sub callback_signon_done(@) { do_callback("signon_done", @_); }
 sub callback_log(@) { do_callback("log", @_); }
+sub callback_typing_status(@) { do_callback("typing_status", @_); }
+sub callback_extended_status(@) { do_callback("extended_status", @_); }
 sub callback_im_ok(@) { do_callback("im_ok", @_); }
 sub callback_connection_changed(@) { do_callback("connection_changed", @_); }
 sub callback_auth_challenge(@) { do_callback("auth_challenge", @_); }
@@ -1859,9 +2320,29 @@ sub set_callback_buddylist_error($\&) { set_callback("buddylist_error", @_); }
 sub set_callback_buddylist_ok($\&) { set_callback("buddylist_ok", @_); }
 sub set_callback_admin_error($\&) { set_callback("admin_error", @_); }
 sub set_callback_admin_ok($\&) { set_callback("admin_ok", @_); }
+sub set_callback_new_buddy_icon($\&) {
+	croak "This client does not support buddy icons." unless $_[0]->{capabilities}->{buddy_icons};
+	set_callback("new_buddy_icon", @_);
+}
+sub set_callback_buddy_icon_uploaded($\&) {
+	croak "This client does not support buddy icons." unless $_[0]->{capabilities}->{buddy_icons};
+	set_callback("buddy_icon_uploaded", @_);
+}
+sub set_callback_buddy_icon_downloaded($\&) {
+	croak "This client does not support buddy icons." unless $_[0]->{capabilities}->{buddy_icons};
+	set_callback("buddy_icon_downloaded", @_);
+}
 sub set_callback_rate_alert($\&) { set_callback("rate_alert", @_); }
 sub set_callback_signon_done($\&) { set_callback("signon_done", @_); }
 sub set_callback_log($\&) { set_callback("log", @_); }
+sub set_callback_typing_status($\&) {
+	croak "This client does not support typing status notification." unless $_[0]->{capabilities}->{typing_status};
+	set_callback("typing_status", @_);
+}
+sub set_callback_extended_status($\&) {
+	croak "This client does not support extended status messages." unless $_[0]->{capabilities}->{extended_status};
+	set_callback("extended_status", @_);
+}
 sub set_callback_im_ok($\&) { set_callback("im_ok", @_); }
 sub set_callback_connection_changed($\&) { set_callback("connection_changed", @_); }
 sub set_callback_auth_challenge($\&) { set_callback("auth_challenge", @_); }
@@ -1873,8 +2354,8 @@ sub set_callback_auth_challenge($\&) { set_callback("auth_challenge", @_); }
 =head1 CHATS
 
 Aside from the methods listed here, there are a couple of methods of the
-C<Net::OSCAR::Chat> object that are important for implementing chat
-functionality.  C<Net::OSCAR::Chat> is a descendent of C<Net::OSCAR::Connection>.
+C<Net::OSCAR::Connection::Chat> object that are important for implementing chat
+functionality.  C<Net::OSCAR::Connection::Chat> is a descendent of C<Net::OSCAR::Connection>.
 
 =over 4
 
@@ -1968,6 +2449,12 @@ instance, an error message and an error number.)
 =item GROUPPERM_OSCAR
 
 =item GROUPPERM_AOL
+
+=item TYPINGSTATUS_STARTED
+
+=item TYPINGSTATUS_TYPING
+
+=item TYPINGSTATUS_FINISHED
 
 =back
 
@@ -2064,6 +2551,62 @@ Returns the C<Net::OSCAR> object associated with this C<Net::OSCAR::Connection>.
 =head1 HISTORY
 
 =over 4
+
+=item *
+
+1.00, 2004-01-03
+
+=over 4
+
+=item *
+
+Documented requirement to wait for buddylist_foo callback between calls to commit_buddylist
+
+=item *
+
+Fixed handling of idle time (zoyboy22)
+
+=item *
+
+More flexible signon method
+
+=item *
+
+Added buddy alias support
+
+=item *
+
+Buddy icon support
+
+=item *
+
+Typing notification support
+
+=item *
+
+mac.com screenname support
+
+=item *
+
+Support for communicating with ICQ users from AIM
+
+=item *
+
+iChat extended status message support
+
+=item *
+
+We now emulate AOL Instant Messenger for Windows 5.2
+
+=item *
+
+We now parse the capabilities of other users
+
+=item *
+
+Attempts at Win32 (non-cygwin) support
+
+=back
 
 =item *
 
@@ -2601,6 +3144,12 @@ Mark Doliner for help with remote buddylists.  E<lt>http://kingant.net/libfaim/R
 
 Sam Wong E<lt>sam@uhome.netE<gt> for a patch implementing ICQ2000 support.
 
+Bill Atkins for typing status notification and mobile user support.  E<lt>http://www.milkbone.org/E<gt>
+
+Jonathon Wodnicki for additional help with typing status notification.
+
+Roy Camp for loads of bug reports and ideas and helping with user support.
+
 The gaim team - the source to their libfaim client was also very helpful.  E<lt>http://gaim.sourceforge.net/E<gt>
 
 The users of aimirc for being reasonably patient while this module was developed.  E<lt>http://www.zevils.com/programs/aimirc/E<gt>
@@ -2613,6 +3162,8 @@ POE.  E<lt>http://poe.perl.org/E<gt>
 AOL, for creating the AOL Instant Messenger service, even though they aren't terribly helpful to
 developers of third-party clients.
 
+Apple Computer for help with mac.com support.
+
 =head1 LEGAL
 
 Copyright (c) 2001 Matthew Sachs.  All rights reserved.
@@ -2620,7 +3171,9 @@ This program is free software; you can redistribute it and/or modify it under th
 same terms as Perl itself.  B<AOL> and B<AMERICA ONLINE> are registered trademarks
 owned by America Online, Inc.  The B<INSTANT MESSENGER> mark is owned by America
 Online, Inc.  B<ICQ> is a trademark and/or servicemark of ICQ.  C<Net::OSCAR> is not
-endorsed by, or affiliated with, America Online, Inc or ICQ.
+endorsed by, or affiliated with, America Online, Inc or ICQ.  B<iChat> and B<Apple Computer>
+are registered trademarks of Apple Computer, Inc.  C<Net::OSCAR> is not endorsed by,
+or affiliated with, Apple Computer, Inc or iChat.
 
 =cut
 

@@ -1,5 +1,6 @@
 #!/usr/bin/perl -w
 
+use lib "./blib/lib";
 use strict;
 use Net::OSCAR qw(:standard);
 use Digest::MD5;
@@ -7,6 +8,16 @@ eval {
 	require Data::Dumper;
 };
 use vars qw($pid $oscar @chats @invites $loglevel $domd5 $password);
+
+my $readline = 0;
+eval {
+	require Term::ReadLine;
+};
+if($@) {
+	warn "Couldn't load Term::ReadLine -- omitting readline support: $@\n";
+} else {
+	$readline = 1;
+}
 
 #$Carp::Verbose = 1;
 $| = 1;
@@ -25,6 +36,16 @@ sub signon_done($) {
 	print "You are now signed on to AOL Instant Messenger.\n";
 }
 
+sub typing_status($$$) {
+	my($oscar, $who, $status) = @_;
+	print STDERR "We received typing status $status from $who.\n";
+}
+
+sub extended_status($$) {
+	my($oscar, $status) = @_;
+	print STDERR "Our extended status is $status.\n";
+}
+
 sub rate_alert($$$) {
 	my($oscar, $level, $clear, $window) = @_;
 
@@ -34,7 +55,7 @@ sub rate_alert($$$) {
 
 sub buddylist_error($$$) {
 	my($oscar, $error, $what) = @_;
-	print STDERR "Error $error occured while trying to $what on your buddylist\n";
+	print STDERR "Error $error occured while $what on your buddylist\n";
 }
 
 sub buddylist_ok($) {
@@ -53,6 +74,30 @@ sub admin_ok($$) {
 	my($oscar, $reqtype) = @_;
 
 	print "Your $reqtype request was successful.\n";
+}
+
+sub new_buddy_icon($$$) {
+	my($oscar, $screenname, $buddat) = @_;
+	print "$screenname claims to have a new buddy icon.\n";
+}
+
+sub buddy_icon_downloaded($) {
+	my($oscar, $screenname, $icon) = @_;
+
+	print "Buddy icon for $screenname downloaded...\n";
+	open(ICON, ">/tmp/$screenname.$$.icon") or do {
+		print "Couldn't open /tmp/$screenname.$$.icon for writing: $!\n";
+		return;
+	};
+	print ICON $icon;
+	close ICON;
+	print "Icon written to /tmp/$screenname.$$.icon.\n";
+}
+
+sub buddy_icon_uploaded($) {
+	my($oscar) = @_;
+
+	print "Your buddy icon was successfully uploaded.\n";
 }
 
 sub chat_closed($$$) {
@@ -142,6 +187,10 @@ sub buddy_info($$$$) {
 
 	$extra .= "\nMember Since: $membersince" if $membersince;
 	$extra .= "\nIdle Time (secs): $buddat->{idle}" if exists($buddat->{idle}) and defined($buddat->{idle});
+	if($buddat->{capabilities}) {
+		$extra .= "\nCapabilities:";
+		$extra .= "\n\t$_" foreach values %{$buddat->{capabilities}};
+	}
 
 	my $profile = "";
 	if($buddat->{awaymsg}) {
@@ -164,6 +213,9 @@ EOF
 =================================
 Buddy info for $screenname
 ---------------------------------
+EOF
+print "Extended Status: $buddat->{extended_status}\n" if exists($buddat->{extended_status});
+print <<EOF;
 Flags: $extra
 On Since: $onsince
 Evil Level: $buddat->{evil}%
@@ -179,6 +231,11 @@ sub auth_challenge($$$) {
 	$md5->add($password);
 	$md5->add($hashstr);
 	$oscar->auth_response($md5->digest);
+}
+
+sub im_ok($$$) {
+	my($oscar, $to, $reqid) = @_;
+	print "Your message, $reqid, was sent to $to.\n";
 }
 
 $loglevel = $ARGV[0] || 0;
@@ -207,7 +264,7 @@ if($loglevel > 10) {
 	}
 }
 
-$oscar = Net::OSCAR->new();
+$oscar = Net::OSCAR->new(capabilities => [qw(typing_status extended_status buddy_icons)]);
 $oscar->set_callback_error(\&error);
 $oscar->set_callback_buddy_in(\&buddy_in);
 $oscar->set_callback_buddy_out(\&buddy_out);
@@ -225,8 +282,14 @@ $oscar->set_callback_buddylist_ok(\&buddylist_ok);
 $oscar->set_callback_admin_error(\&admin_error);
 $oscar->set_callback_admin_ok(\&admin_ok);
 $oscar->set_callback_rate_alert(\&rate_alert);
+$oscar->set_callback_new_buddy_icon(\&new_buddy_icon);
+$oscar->set_callback_buddy_icon_downloaded(\&buddy_icon_downloaded);
+$oscar->set_callback_buddy_icon_uploaded(\&buddy_icon_uploaded);
+$oscar->set_callback_typing_status(\&typing_status);
+$oscar->set_callback_extended_status(\&extended_status);
 $oscar->set_callback_signon_done(\&signon_done);
 $oscar->set_callback_auth_challenge(\&auth_challenge);
+$oscar->set_callback_im_ok(\&im_ok);
 $oscar->loglevel($loglevel);
 if($domd5) {
 	$oscar->signon(screenname => $username, password => undef);
@@ -274,6 +337,7 @@ remove_buddy group screennames
 evil screenname [anon]
 buddylist
 set_buddy_comment group buddy [comment]
+set_buddy_alias group buddy [alias]
 reorder_groups groups
 reorder_buddies group buddies
 ====chat====
@@ -287,6 +351,9 @@ chat_send chat_number message
 ====misc====
 set_profile profile
 set_away awaymsg
+set_extended_status statusmsg
+set_icon iconpath
+get_icon screenname
 get_dir screenname
 set_dir [info]
 format_screenname screenname
@@ -321,7 +388,8 @@ EOF
 			$oscar->commit_buddylist;
 		} elsif($cmd eq "send") {
 			my($who) = shift @params;
-			$oscar->send_im($who, join(" ", @params));
+			my $ret = $oscar->send_im($who, join(" ", @params));
+			#print "Sending IM $ret to $who...\n";
 		} elsif($cmd eq "info") {
 			print "Requesting buddy info...\n";
 			$oscar->get_info($params[0]);
@@ -347,6 +415,10 @@ EOF
 			my $buddy = shift @params;
 			$oscar->set_buddy_comment($buddy, join(" ", @params));
 			$oscar->commit_buddylist;
+		} elsif($cmd eq "set_buddy_alias") {
+			my $buddy = shift @params;
+			$oscar->set_buddy_alias($buddy, join(" ", @params));
+			$oscar->commit_buddylist;
 		} elsif($cmd eq "buddylist") {
 			foreach my $group($oscar->groups) {
 				printf "%s\n", $group, $oscar->{buddies}->{$group}->{groupid};
@@ -355,12 +427,16 @@ EOF
 
 					my $extra = "";
 					if($buddat) {
+						$extra .= " [MOBILE]" if $buddat->{mobile};
+						$extra .= " [TYPINGSTATUS]" if $buddat->{typingstatus};
 						$extra .= " [ONLINE]" if $buddat->{online};
 						$extra .= " [TRIAL]" if $buddat->{trial};
 						$extra .= " [AOL]" if $buddat->{aol};
 						$extra .= " [FREE]" if $buddat->{free};
 						$extra .= " [AWAY]" if $buddat->{away};
 						$extra .= " {".$buddat->{comment}."}" if defined $buddat->{comment};
+						$extra .= " {{".$buddat->{alias}."}}" if defined $buddat->{alias};
+						$extra .= " (".$buddat->{extended_status}.")" if defined $buddat->{extended_status};
 					} else {
 						$buddat = {buddyid => 0};
 					}
@@ -399,6 +475,26 @@ EOF
 			$oscar->commit_buddylist;
 		} elsif($cmd eq "set_away") {
 			$oscar->set_away(join(" ", @params));
+		} elsif($cmd eq "set_extended_status") {
+			$oscar->set_extended_status(join(" ", @params));
+		} elsif($cmd eq "set_icon") {
+			local $/ = undef;
+			open(ICON, join(" ", @params)) or do {
+				print "Couldn't open ", join(" ", @params), ": $!\n";
+				next;
+			};
+			binmode ICON;
+			my $icondata = <ICON>;
+			close ICON;
+			$oscar->set_icon($icondata);
+			$oscar->commit_buddylist;
+		} elsif($cmd eq "get_icon") {
+			my $buddat = $oscar->buddy(join(" ", @params));
+			if(!$buddat or !$buddat->{icon_md5sum}) {
+				print "Couldn't find icon MD5 checksum.\n";
+			} else {
+				$oscar->get_icon($buddat->{screenname}, $buddat->{icon_md5sum});
+			}
 		} elsif($cmd eq "get_dir") {
 			print "Not implemented.\n";
 		} elsif($cmd eq "set_dir") {
@@ -446,4 +542,3 @@ EOF
 	}
 }
 
-sub END { system("/home/matthewg/skill $pid") if $loglevel > 10; }

@@ -68,6 +68,12 @@ sub import {
 		push @constants, $1;
 	}
 	close OSCARCOMMON;
+	open(OSCARCONSTANTS, $INC{"Net/OSCAR/Constants.pm"});
+	while(<OSCARCONSTANTS>) {
+		next unless /use constant (.+?) =>/;
+		push @constants, $1;
+	}
+	close OSCARCONSTANTS;
 
 	filter_add(
 		sub {
@@ -75,7 +81,7 @@ sub import {
 			$status = filter_read();
 
 			s!unpack(\s*\("[^"]*/)!Net::OSCAR::OldPerl::slash_unpack$1!;
-			s!substr\s*\(([^,]+),([^,]+),([^,]+),([^)]+)\)!Net::OSCAR::OldPerl::my_substr(\\$1, $2, $3, $4)!;
+			s!substr\s*\(([^,)]+),([^,)]+),([^,)]+),([^)]+)\)!Net::OSCAR::OldPerl::my_substr(\\$1, $2, $3, $4)!;
 
 			foreach my $constant(@constants) {
 				s/(?!&)$constant(?![a-zA-Z_])(?!\(\))/&$constant()/g;

@@ -15,12 +15,15 @@ SYNOPSIS
             }
 
 INSTALLATION
-            perl Makefile.PL
-            make
-            make test
-            make install
-
-    See "perlmodinstall" for details.
+            perl Build.PL
+            perl Build
+            perl Build test
+            perl Build install
+                                                                                                      
+    See "perldoc Module::Build" for details. Note that this requires that
+    you have the perl module Module::Build installed. If you don't, the
+    traditional "perl Makefile.PL ; make ; make test ; make install" should
+    still work.
 
 DEPENDENCIES
     This modules requires "Digest::MD5" and "Scalar::Util".
@@ -100,13 +103,15 @@ EVENT PROCESSING
     $poll->handles(POLLIN | POLLOUT | POLLERR | POLLHUP)" and walking
     through the handles.
 
+    For optimum performance, use the "connection_changed" callback.
+
 FUNCTIONALITY
-    "Net::OSCAR" pretends to be WinAIM 4.7.2480. It supports remote
-    buddylists including permit and deny settings. It also supports chat. At
-    the present time, setting and retrieving of directory information is not
-    supported; nor are email privacy settings, buddy icons, voice chat,
-    stock ticker, and many other of the official AOL Instant Messenger
-    client's features.
+    "Net::OSCAR" pretends to be WinAIM 5.2.3292. It supports remote
+    buddylists including permit and deny settings. It also supports chat,
+    buddy icons, and extended status messages. At the present time, setting
+    and retrieving of directory information is not supported; nor are email
+    privacy settings, voice chat, stock ticker, file transfer, direct IM,
+    and many other of the official AOL Instant Messenger client's features.
 
 TERMINOLOGY/METHODOLOGY
     When you sign on with the OSCAR service, you are establishing an OSCAR
@@ -128,7 +133,24 @@ TERMINOLOGY/METHODOLOGY
     permit everyone on our buddylist.
 
 METHODS
-    new Creates a new "Net::OSCAR" object.
+    new ([capabilities => CAPABILITIES])
+        Creates a new "Net::OSCAR" object. You may optionally pass a hash to
+        set some parameters for the object.
+
+        capabilities
+            A listref of optional features that your client supports. Valid
+            capabilities are:
+
+            extended_status
+                iChat-style extended status messages
+
+            buddy_icons
+            file_transfer
+            file_sharing
+            typing_status
+                Typing status notification
+
+                $oscar = Net::OSCAR->new(capabilities => [qw(extended_status typing_status)]);
 
     timeout ([NEW TIMEOUT])
         Gets or sets the timeout value used by the do_one_loop method. The
@@ -151,21 +173,29 @@ METHODS
             undefined, the auth_challenge callback will be used - see
             "auth_challenge" for details.
 
+        local_ip
+            If you have more than one IP address with a route to the
+            internet, this parameter can be used to specify which to use as
+            the source IP for outgoing connections.
+
         host
         port
+        proxy_type
+            Either "SOCKS4", "SOCKS5", "HTTP", or HTTPS. This and
+            "proxy_host" must be specified if you wish to use a proxy.
+            "proxy_port", "proxy_username", "proxy_password" are optional.
+            Note that proxy support is considered experimental. You will
+            need to have the "Net::SOCKS" module installed for SOCKS
+            proxying or the "LWP::UserAgent" module installed for HTTP
+            proxying.
 
-        There are some other data that can be passed to this method. These
-        data are used to sign on to an OSCAR-using service other than the
-        default of AOL Instant Messenger, such as ICQ. You should not
-        attempt to specify these data directly - instead, use one of the
-        following constants:
+        proxy_host
+        proxy_port
+        proxy_username
+        proxy_password
 
-        OSCAR_SVC_AIM
-        OSCAR_SVC_ICQ
-
-        Example of signing on to ICQ:
-
-                $oscar->signon(screenname => "123456", password => "password", OSCAR_SVC_ICQ);
+        If the screenname is all-numeric, it will automatically be treated
+        as an ICQ UIN instead of an AIM screenname.
 
     auth_response (MD5_DIGEST)
         Provide a response to an authentication challenge - see the
@@ -222,7 +252,9 @@ METHODS
         Sends your modified buddylist to the OSCAR server. Changes to the
         buddylist won't actually take effect until this method is called.
         Methods that change the buddylist have a warning about needing to
-        call this method in their documentation.
+        call this method in their documentation. After calling this method,
+        your program MUST not call it again until either the buddylist_ok or
+        buddylist_error callbacks are received.
 
     rollback_buddylist
         Revert changes you've made to the buddylist, assuming you haven't
@@ -356,6 +388,22 @@ METHODS
         identify the message. If the message was too long to send, returns
         zero.
 
+    send_typing_status (RECIPIENT, STATUS)
+        Send a typing status change to another user. Send these messages to
+        implement typing status notification. Valid values for "STATUS" are:
+
+        *   TYPINGSTATUS_STARTED: The user has started typing to the
+            recipient. This indicates that typing is actively taking place.
+
+        *   TYPINGSTATUS_TYPING: The user is typing to the recipient. This
+            indicates that there is text in the message input area, but
+            typing is not actively taking place at the moment.
+
+        *   TYPINGSTATUS_FINISHED: The user has finished typing to the
+            recipient. This should be sent when the user starts to compose a
+            message, but then erases all of the text in the message input
+            area.
+
     buddyhash
         Returns a reference to a tied hash which automatically normalizes
         its keys upon a fetch. Use this for hashes whose keys are AIM
@@ -378,13 +426,72 @@ METHODS
         something like send you an instant message.
 
     set_away (MESSAGE)
-        Set's the users away message, also marking them as being away. If
+        Sets the user's away message, also marking them as being away. If
         the message is undef or the empty string, the user will be marked as
         no longer being away.
+
+    set_extended_status (MESSAGE)
+        Sets the user's extended status message. This requires the
+        "Net::OSCAR" object to have been created with the "extended_status"
+        capability. Currently, the only clients which support extended
+        status messages are Net::OSCAR, Gaim, and iChat. If the message is
+        undef or the empty string, the user's extended status message will
+        be cleared.
 
     set_info (PROFILE)
         Sets the user's profile. Call "commit_buddylist" to have the new
         profile stored on the OSCAR server.
+
+        Note that if the user's profile was previously set with Net::OSCAR,
+        it will be stored in the server-side buddylist, and so this method
+        will not have to be called every time the user signs on. However,
+        other clients do not store the profile on the server, so if the user
+        previously set a profile with a non-Net::OSCAR-based client, this
+        method will need to be called in order for the user's profile to be
+        set.
+
+        See the file "PROTOCOL", included with the "Net::OSCAR"
+        distribution, for details of how we're storing this data.
+
+    set_icon (ICONDATA)
+        Sets the user's buddy icon. The "Net::OSCAR" object must have been
+        created with the "buddy_icons" capability to use this. "ICONDATA"
+        must be less than 4kb, should be 48x48 pixels, and should be BMP,
+        GIF, or JPEG image data. You must call commit_buddylist for this
+        change to take effect. If "ICONDATA" is the empty string, the user's
+        buddy icon will be removed.
+
+        When reading the icon data from a file, make sure to call "binmode"
+        on the file handle.
+
+        Note that if the user's buddy icon was previously set with
+        Net::OSCAR, enough data will be stored in the server-side buddylist
+        that this will not have to be called every time the user signs on.
+        However, other clients do not store the extra data in the buddylist,
+        so if the user previously set a buddy icon with a
+        non-Net::OSCAR-based client, this method will need to be called in
+        order for the user's buddy icon to be set properly.
+
+        See the file "PROTOCOL", included with the "Net::OSCAR"
+        distribution, for details of how we're storing this data.
+
+        You should receive a buddy_icon_uploaded callback in response to
+        this method.
+
+    get_icon (SCREENNAME, MD5SUM)
+        Gets a user's buddy icon. See set_icon for details. To make sure
+        this method isn't called excessively, please check the
+        "icon_checksum" and "icon_timestamp" data, which are available via
+        the buddy method (even for people not on the user's buddy list.) The
+        MD5 checksum of a user's icon will be in the "icon_md5sum" key
+        returned by buddy.
+
+        You should receive a buddy_icon_downloaded callback in response to
+        this method.
+
+    icon_checksum (ICONDATA)
+        Returns a checksum of the buddy icon. Use this in conjunction with
+        the "icon_checksum" buddy info key to cache buddy icons.
 
     change_password (CURRENT PASSWORD, NEW PASSWORD)
         Changes the user's password.
@@ -478,6 +585,16 @@ METHODS
             "set_buddy_comment". Note that this key will be present but
             undefined if there is no comment.
 
+        alias
+            A user-defined alias for the buddy. See "set_buddy_alias". Note
+            that this key will be present but undefined if there is no
+            alias.
+
+        extended_status
+            The user's extended status message, if one is set, will be in
+            this key. This requires that you set the "extended_status"
+            capability when creating the "Net::OSCAR" object.
+
         trial
             The user's account has trial status.
 
@@ -493,6 +610,33 @@ METHODS
         admin
             The user is an administrator.
 
+        mobile
+            The user is using a mobile device.
+
+        typing_status
+            The user is known to support typing status notification. We only
+            find this out if they send us an IM.
+
+        capabilities
+            The user's capabilities. This is a reference to a hash whose
+            keys are the user's capabilities, and whose values are
+            descriptions of their respective capabilities.
+
+        icon
+            The user's buddy icon, if available.
+
+        icon_checksum
+            The checksum time of the user's buddy icon, if available. Use
+            this, in conjunction with the icon_checksum method, to cache
+            buddy icons.
+
+        icon_timestamp
+            The modification timestamp of the user's buddy icon, if
+            available.
+
+        icon_length
+            The length of the user's buddy icon, if available.
+
         membersince
             Time that the user's account was created, in the same format as
             the "time" function.
@@ -506,6 +650,13 @@ METHODS
             present but zero, the user is not idle. If this key is not
             present, the user is not reporting idle time.
 
+        evil
+            Evil (warning) level for the user.
+
+        Some keys; namely, "typing_status" and "icon_checksum", may be
+        available for people who the user has communicated with but who are
+        not on the user's buddylist.
+
     email
         Returns the email address currently assigned to the user's account.
 
@@ -518,22 +669,29 @@ METHODS
         Otherwise, returns false.
 
     set_buddy_comment (GROUP, BUDDY[, COMMENT])
-        Set a brief comment about a buddy. This can be used for things such
-        as the buddy's real name. You must call "commit_buddylist" to save
-        the comment to the server. If COMMENT is undefined, the comment is
+        Set a brief comment about a buddy. You must call "commit_buddylist"
+        to save the comment to the server. If COMMENT is undefined, the
+        comment is deleted.
+
+    set_buddy_alias (GROUP, BUDDY[, ALIAS])
+        Set an alias for a buddy. You must call "commit_buddylist" to save
+        the comment to the server. If ALIAS is undefined, the alias is
         deleted.
 
     chat_invite (CHAT, MESSAGE, WHO)
         Deprecated. Provided for compatibility with "Net::AIM". Use the
-        appropriate method of the "Net::OSCAR::Chat" object instead.
+        appropriate method of the "Net::OSCAR::Connection::Chat" object
+        instead.
 
     chat_leave (CHAT)
         Deprecated. Provided for compatibility with "Net::AIM". Use the
-        appropriate method of the "Net::OSCAR::Chat" object instead.
+        appropriate method of the "Net::OSCAR::Connection::Chat" object
+        instead.
 
     chat_send (CHAT, MESSAGE)
         Deprecated. Provided for compatibility with "Net::AIM". Use the
-        appropriate method of the "Net::OSCAR::Chat" object instead.
+        appropriate method of the "Net::OSCAR::Connection::Chat" object
+        instead.
 
 CALLBACKS
     "Net::OSCAR" uses a callback mechanism to notify you about different
@@ -604,9 +762,34 @@ CALLBACKS
         This is called when an administrative function succeeds. See
         admin_error for more info.
 
+    new_buddy_icon (OSCAR, SCREENNAME, BUDDY DATA)
+        This is called when someone, either someone the user is talking with
+        or someone on their buddylist, has a potentially new buddy icon. The
+        buddy data is guaranteed to have at least "icon_checksum" available;
+        "icon_timestamp" and "icon_length" may not be. Specifically, if
+        "Net::OSCAR" found out about the buddy icon through a buddy status
+        update (the sort that triggers a buddy_in callback), these data will
+        not be available; if "Net::OSCAR" found out about the icon via an
+        incoming IM from the person, these data will be available.
+
+        Upon receiving this callback, an application should use the
+        "icon_checksum" to search for the icon in its cache, and call
+        get_icon if it can't find it. If the "icon_md5sum", which is what
+        needs to get passed to get_icon, is not present in the buddy data,
+        use get_info to request the information for the user, and then call
+        get_icon from the buddy_info callback.
+
+    buddy_icon_uploaded (OSCAR)
+        This is called when the user's buddy icon is successfully uploaded
+        to the server.
+
+    buddy_icon_downloaded (OSCAR, SCREENNAME, ICONDATA)
+        This is called when a user's buddy icon is successfully downloaded
+        from the server.
+
     chat_closed (OSCAR, CHAT, ERROR)
-        Your connection to CHAT (a "Net::OSCAR::Chat" object) was severed
-        due to ERROR.
+        Your connection to CHAT (a "Net::OSCAR::Connection::Chat" object)
+        was severed due to ERROR.
 
     buddy_in (OSCAR, SCREENNAME, GROUP, BUDDY DATA)
         SCREENNAME (in buddy group GROUP) has signed on, or their
@@ -622,6 +805,15 @@ CALLBACKS
 
     chat_buddy_out (OSCAR, SCREENNAME, CHAT)
         Called when someone leaves a chatroom.
+
+    typing_status (OSCAR, SCREENNAME, STATUS)
+        Called when someone has sent us a typing status notification
+        message. See send_typing_status for a description of the different
+        statuses.
+
+    extended_status (OSCAR, STATUS)
+        Called when the user's extended status changes. This will normally
+        be sent in response to a successful set_extended_status call.
 
     im_ok (OSCAR, TO, REQID)
         Called when an IM to "TO" is successfully sent. REQID is the request
@@ -641,13 +833,13 @@ CALLBACKS
     chat_invite (OSCAR, WHO, MESSAGE, CHAT, CHATURL)
         Called when someone invites us into a chatroom. MESSAGE is the
         message that they specified on the invitation. CHAT is the name of
-        the chatroom. CHATURL is a chat URL and not a "Net::OSCAR::Chat"
-        object. CHATURL can be passed to the chat_accept method to accept
-        the invitation.
+        the chatroom. CHATURL is a chat URL and not a
+        "Net::OSCAR::Connection::Chat" object. CHATURL can be passed to the
+        chat_accept method to accept the invitation.
 
     chat_joined (OSCAR, CHATNAME, CHAT)
-        Called when you enter a chatroom. CHAT is the "Net::OSCAR::Chat"
-        object for the chatroom.
+        Called when you enter a chatroom. CHAT is the
+        "Net::OSCAR::Connection::Chat" object for the chatroom.
 
     evil (OSCAR, NEWEVIL[, FROM])
         Called when your evil level changes. NEWEVIL is your new evil level,
@@ -742,9 +934,9 @@ CALLBACKS
 
 CHATS
     Aside from the methods listed here, there are a couple of methods of the
-    "Net::OSCAR::Chat" object that are important for implementing chat
-    functionality. "Net::OSCAR::Chat" is a descendent of
-    "Net::OSCAR::Connection".
+    "Net::OSCAR::Connection::Chat" object that are important for
+    implementing chat functionality. "Net::OSCAR::Connection::Chat" is a
+    descendent of "Net::OSCAR::Connection".
 
     invite (WHO, MESSAGE)
         Invite somebody into the chatroom.
@@ -803,6 +995,9 @@ CONSTANTS
     RATE_DISCONNECT
     GROUPPERM_OSCAR
     GROUPPERM_AOL
+    TYPINGSTATUS_STARTED
+    TYPINGSTATUS_TYPING
+    TYPINGSTATUS_FINISHED
 
 Net::AIM Compatibility
     Here are the major differences between the "Net::OSCAR" interface and
@@ -864,6 +1059,33 @@ MISCELLANEOUS
         "Net::OSCAR::Connection".
 
 HISTORY
+    *   1.00, 2004-01-03
+
+        *   Documented requirement to wait for buddylist_foo callback
+            between calls to commit_buddylist
+
+        *   Fixed handling of idle time (zoyboy22)
+
+        *   More flexible signon method
+
+        *   Added buddy alias support
+
+        *   Buddy icon support
+
+        *   Typing notification support
+
+        *   mac.com screenname support
+
+        *   Support for communicating with ICQ users from AIM
+
+        *   iChat extended status message support
+
+        *   We now emulate AOL Instant Messenger for Windows 5.2
+
+        *   We now parse the capabilities of other users
+
+        *   Attempts at Win32 (non-cygwin) support
+
     *   0.62, 2002-02-25
 
         *   Error handling slightly improved; error 29 is no longer unknown.
@@ -1139,6 +1361,14 @@ CREDITS
 
     Sam Wong <sam@uhome.net> for a patch implementing ICQ2000 support.
 
+    Bill Atkins for typing status notification and mobile user support.
+    <http://www.milkbone.org/>
+
+    Jonathon Wodnicki for additional help with typing status notification.
+
+    Roy Camp for loads of bug reports and ideas and helping with user
+    support.
+
     The gaim team - the source to their libfaim client was also very
     helpful. <http://gaim.sourceforge.net/>
 
@@ -1153,6 +1383,8 @@ CREDITS
     AOL, for creating the AOL Instant Messenger service, even though they
     aren't terribly helpful to developers of third-party clients.
 
+    Apple Computer for help with mac.com support.
+
 LEGAL
     Copyright (c) 2001 Matthew Sachs. All rights reserved. This program is
     free software; you can redistribute it and/or modify it under the same
@@ -1160,5 +1392,7 @@ LEGAL
     owned by America Online, Inc. The INSTANT MESSENGER mark is owned by
     America Online, Inc. ICQ is a trademark and/or servicemark of ICQ.
     "Net::OSCAR" is not endorsed by, or affiliated with, America Online, Inc
-    or ICQ.
+    or ICQ. iChat and Apple Computer are registered trademarks of Apple
+    Computer, Inc. "Net::OSCAR" is not endorsed by, or affiliated with,
+    Apple Computer, Inc or iChat.
 

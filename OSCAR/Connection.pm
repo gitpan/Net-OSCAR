@@ -1,6 +1,13 @@
+=pod
+
+Net::OSCAR::Connection -- individual Net::OSCAR service connection
+
+=cut
+
 package Net::OSCAR::Connection;
 
-$VERSION = '0.62';
+$VERSION = '1.00';
+$REVISION = '$Revision: 1.65.4.7 $';
 
 use strict;
 use vars qw($VERSION);
@@ -12,23 +19,28 @@ use Fcntl;
 use POSIX qw(:errno_h);
 
 use Net::OSCAR::Common qw(:all);
+use Net::OSCAR::Constants;
+use Net::OSCAR::Utility;
 use Net::OSCAR::TLV;
 use Net::OSCAR::Callbacks;
 use Net::OSCAR::OldPerl;
 
-sub new($$$$$$) { # Think you got enough parameters there, Chester?
-	my $class = ref($_[0]) || $_[0] || "Net::OSCAR::Connection";
-	shift;
-	my $self = { };
+if($^O eq "MSWin32") {
+	eval '*F_GETFL = sub {0};';
+	eval '*F_SETFL = sub {0};';
+	eval '*O_NONBLOCK = sub {0}; ';
+}
+
+sub new($@) {
+	my($class, %data) = @_;
+	$class = ref($class) || $class || "Net::OSCAR::Connection";
+	my $self = { %data };
 	bless $self, $class;
 	$self->{seqno} = 0;
-	$self->{session} = shift;
-	$self->{auth} = shift;
-	$self->{conntype} = shift;
-	$self->{description} = shift;
 	$self->{paused} = 0;
 	$self->{outbuff} = "";
-	$self->connect(shift);
+	$self->{state} ||= "write";
+	$self->connect($self->{peer}) if $self->{peer};
 
 	return $self;
 }
@@ -73,8 +85,10 @@ sub flap_put($;$$) {
 		$emsg = substr($self->{outbuff}, 0, $nchars, "");
 		if($self->{outbuff}) {
 			$self->log_print(OSCAR_DBG_NOTICE, "Couldn't do complete write - had to buffer ", length($self->{outbuff}), " bytes.");
+			$self->{state} = "readwrite";
 			$self->{session}->callback_connection_changed($self, "readwrite");
 		} elsif($had_outbuff) {
+			$self->{state} = "read";
 			$self->{session}->callback_connection_changed($self, "read");
 		}
 		$self->log_print(OSCAR_DBG_PACKETS, "Put ", hexdump($emsg));
@@ -168,6 +182,12 @@ sub snac_decode($$) {
 	my($self, $snac) = @_;
 	my($family, $subtype, $flags1, $flags2, $reqid, $data) = (unpack("nnCCNa*", $snac));
 
+	if($flags1 & 0x80) {
+		my($minihdr_len) = unpack("n", $data);
+		$self->log_print(OSCAR_DBG_DEBUG, "Got miniheader of length $minihdr_len");
+		substr($data, 0, 2+$minihdr_len) = "";
+	}
+
 	return {
 		family => $family,
 		subtype => $subtype,
@@ -194,13 +214,21 @@ sub set_blocking($$) {
 	my $blocking = shift;
 	my $flags = 0;
 
-	fcntl($self->{socket}, F_GETFL, $flags);
-	if($blocking) {
-		$flags &= ~O_NONBLOCK;
+	if($^O ne "MSWin32") {
+		fcntl($self->{socket}, F_GETFL, $flags);
+		if($blocking) {
+			$flags &= ~O_NONBLOCK;
+		} else {
+			$flags |= O_NONBLOCK;
+		}
+		fcntl($self->{socket}, F_SETFL, $flags);
 	} else {
-		$flags |= O_NONBLOCK;
+		# Cribbed from http://nntp.x.perl.org/group/perl.perl5.porters/42198
+		ioctl($self->{socket},
+			0x80000000 | (4 << 16) | (ord('f') << 8) | 126,
+			$blocking
+		) or croak "Couldn't set Win32 blocking: $!";
 	}
-	fcntl($self->{socket}, F_SETFL, $flags);
 
 	return $self->{socket};
 }
@@ -208,10 +236,7 @@ sub set_blocking($$) {
 sub connect($$) {
 	my($self, $host) = @_;
 	my $temp;
-	my %tlv;
 	my $port;
-
-	tie %tlv, "Net::OSCAR::TLV";
 
 	return $self->{session}->crapout($self, "Empty host!") unless $host;
 	$host =~ s/:(.+)//;
@@ -231,17 +256,53 @@ sub connect($$) {
 	$self->{port} = $port;
 
 	$self->log_print(OSCAR_DBG_NOTICE, "Connecting to $host:$port.");
-	$self->{socket} = gensym;
-	socket($self->{socket}, PF_INET, SOCK_STREAM, getprotobyname('tcp'));
+	if(defined($self->{session}->{proxy_type})) {
+		if($self->{session}->{proxy_type} eq "SOCKS4" or $self->{session}->{proxy_type} eq "SOCKS5") {
+			require Net::SOCKS or die "SOCKS proxying not available - couldn't load Net::SOCKS: $!\n";
 
-	$self->{ready} = 0;
-	$self->{connected} = 0;
+			my $socksver;
+			if($self->{session}->{proxy_type} eq "SOCKS4") {
+				$socksver = 4;
+			} else {
+				$socksver = 5;
+			}
 
-	$self->set_blocking(0);
-	my $addr = inet_aton($host) or return $self->{session}->crapout($self, "Couldn't resolve $host.");
-	if(!connect($self->{socket}, sockaddr_in($port, $addr))) {
-		return 1 if $! == EINPROGRESS;
-		return $self->{session}->crapout($self, "Couldn't connect to $host:$port: $!");
+			my %socksargs = (
+				socks_addr => $self->{session}->{proxy_host},
+				socks_port => $self->{session}->{proxy_port} || 1080,
+				protocol_version => $socksver
+			);
+			$socksargs{user_id} = $self->{session}->{proxy_username} if exists($self->{session}->{proxy_username});
+			$socksargs{user_password} = $self->{session}->{proxy_password} if exists($self->{session}->{proxy_password});
+		        $self->{socks} = new Net::SOCKS(%socksargs) or return $self->{session}->crapout($self, "Couldn't connect to SOCKS proxy: $@");
+
+			$self->{socket} = $self->{socks}->connect(peer_addr => $host, peer_port => $port) or return $self->{session}->crapout({}, "Couldn't establish connection via SOCKS: $@\n");
+
+			$self->{ready} = 0;
+			$self->{connected} = 1;
+			$self->set_blocking(0);
+		} elsif($self->{session}->{proxy_type} eq "HTTP" or $self->{session}->{proxy_type} eq "HTTPS") {
+			$self->{ready} = 0;
+			$self->{connected} = 1;
+		} else {
+			die "Unknown proxy_type $self->{session}->{proxy_type} - valid types are SOCKS4, SOCKS5, HTTP, and HTTPS\n";
+		}
+	} else {
+		$self->{socket} = gensym;
+		socket($self->{socket}, PF_INET, SOCK_STREAM, getprotobyname('tcp'));
+		if($self->{session}->{local_ip}) {
+			bind($self->{socket}, sockaddr_in(0, inet_aton($self->{session}->{local_ip}))) or croak "Couldn't bind to desired IP: $!\n";
+		}
+		$self->set_blocking(0);
+
+		my $addr = inet_aton($host) or return $self->{session}->crapout($self, "Couldn't resolve $host.");
+		if(!connect($self->{socket}, sockaddr_in($port, $addr))) {
+			return 1 if $! == EINPROGRESS;
+			return $self->{session}->crapout($self, "Couldn't connect to $host:$port: $!");
+		}
+
+		$self->{ready} = 0;
+		$self->{connected} = 0;
 	}
 
 	return 1;
@@ -254,14 +315,11 @@ sub get_filehandle($) { shift->{socket}; }
 sub process_one($;$$$) {
 	my($self, $read, $write, $error) = @_;
 	my $snac;
-	my %tlv;
 
 	if($error) {
 		$self->{sockerr} = 1;
 		return $self->disconnect();
 	}
-
-	tie %tlv, "Net::OSCAR::TLV";
 
 	$read ||= 1;
 	$write ||= 1;
@@ -274,6 +332,7 @@ sub process_one($;$$$) {
 	if($write && !$self->{connected}) {
 		$self->log_print(OSCAR_DBG_NOTICE, "Connected.");
 		$self->{connected} = 1;
+		$self->{state} = "read";
 		$self->{session}->callback_connection_changed($self, "read");
 		return 1;
 	} elsif($read && !$self->{ready}) {
@@ -285,6 +344,7 @@ sub process_one($;$$$) {
 		} else {
 			$self->log_print(OSCAR_DBG_DEBUG, "Got connack.");
 		}
+
 		return $self->{session}->crapout($self, "Got bad connack from server") unless $self->{channel} == FLAP_CHAN_NEWCONN;
 
 		if($self->{conntype} == CONNTYPE_LOGIN) {
@@ -295,19 +355,15 @@ sub process_one($;$$$) {
 
 			$self->log_print(OSCAR_DBG_SIGNON, "Sending screenname.");
 			if(!$self->{session}->{svcdata}->{hashlogin}) {
-				%tlv = (
+				$self->flap_put(tlv_encode(tlv(
 					0x17 => pack("C6", 0, 0, 0, 0, 0, 0),
 					0x01 => $self->{session}->{screenname}
-				);
-				$self->flap_put(tlv_encode(\%tlv));
+				)));
 			} else {
-				%tlv = signon_tlv($self->{session}, $self->{auth});
-				$self->flap_put(pack("N", 1) . tlv_encode(\%tlv), FLAP_CHAN_NEWCONN);
+				$self->flap_put(pack("N", 1) . tlv_encode(signon_tlv($self->{session}, $self->{auth})), FLAP_CHAN_NEWCONN);
 			}
 		} else {
 			$self->log_print(OSCAR_DBG_NOTICE, "Sending BOS-Signon.");
-			#%tlv = (0x06 =>$self->{auth});
-			#$self->flap_put(pack("N", 1) . tlv_encode(\%tlv), FLAP_CHAN_NEWCONN);
 			$self->snac_put(family => 0, subtype => 1,
 				flags2 => 0x6,
 				reqid => 0x01000000 | (unpack("n", substr($self->{auth}, 0, 2)))[0],
@@ -343,19 +399,16 @@ sub ready($) {
 
 	return if $self->{sentready}++;
 	$self->log_print(OSCAR_DBG_DEBUG, "Sending client ready.");
-	if($self->{conntype} != CONNTYPE_BOS) {
+	my $conntype = $self->{conntype};
+	if($conntype != CONNTYPE_BOS) {
 		$self->snac_put(family => 0x1, subtype => 0x2, data => pack("n*",
-			1, 3, 0x10, 0x47B, $self->{conntype}, 1, 0x10, 0x47B
+			1, OSCAR_TOOLDATA()->{1}->{version}, OSCAR_TOOLDATA()->{1}->{toolid}, OSCAR_TOOLDATA()->{1}->{toolversion},
+			$conntype, OSCAR_TOOLDATA()->{$conntype}->{version}, OSCAR_TOOLDATA()->{$conntype}->{toolid}, OSCAR_TOOLDATA()->{$conntype}->{toolversion}
 		));
 	} else {
-		$self->snac_put(family => 0x1, subtype => 0x2, data => pack("n*", 
-			1, 3, 0x110, 0x47B, 13, 1, 0x110, 0x47B,
-			2, 1, 0x101, 0x47B, 3, 1, 0x110, 0x47B,
-			4, 1, 0x110, 0x47B, 6, 1, 0x110, 0x47B,
-			8, 1, 0x104, 1, 9, 1, 0x110, 0x47B,
-			0xA, 1, 0x110, 0x47B, 0xB, 1, 0x104, 1,
-			0xC, 1, 0x104, 1
-		));
+		my $data = "";
+		$data .= pack("n*", $_, OSCAR_TOOLDATA()->{$_}->{version}, OSCAR_TOOLDATA()->{$_}->{toolid}, OSCAR_TOOLDATA()->{$_}->{toolversion}) foreach sort {$b <=> $a} grep {not OSCAR_TOOLDATA()->{$_}->{nobos}} keys %{OSCAR_TOOLDATA()};
+		$self->snac_put(family => 0x1, subtype => 0x2, data => $data);
 	}
 }
 

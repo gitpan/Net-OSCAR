@@ -1,33 +1,33 @@
+=pod
+
+Net::OSCAR::_BLInternal -- internal buddylist stuff
+
+This handles conversion of Net::OSCAR to "OSCAR buddylist format",
+and the sending of buddylist changes to the OSCAR server.
+
+=cut
+
 package Net::OSCAR::_BLInternal;
 
 use strict;
-use Net::OSCAR::Common qw(:all);
 use Net::OSCAR::OldPerl;
+use Net::OSCAR::Common qw(:all);
+use Net::OSCAR::Constants;
+use Net::OSCAR::Utility;
 
-# Heh, this is fun.
-# This is what we use as the first arg to Net::OSCAR::TLV when creating a new BLI.
-# What this does is make it so that the hashref-keys (keys whose values are hashrefs)
-# of the root BLI will be Net::OSCAR::TLVs.  Hashref-keys of those N::O::TLVs will also
-# be N::O::TLVs.  Same for the next level.  The level after that gets a hashref
-# with two keys: name is the empty string and data is a N::O::TLV.
-# 
-# Here's a better way to picture it:
-#    $bli = Net::OSCAR::TLV->new(BLI_AUTOVIV);
-#    $bli->{$type}->{$gid}->{$bid}->{data}->{0xABCD} = "foo";
-#          ^^^^^^^  ^^^^^^  ^^^^^^  ^^^^^^
-#          TLV      TLV     {name,  TLV
-#                            data}      
-#
-# The subkeys are automagically TLV-ified.
-#
-use constant BLI_AUTOVIV =>
-	q!
-		tie %$value, ref($self), q#
-			tie %$value, ref($self), q^
-				$value->{name} = ""; $value->{data} = Net::OSCAR::Common::tlvtie;
-			^
-		#
-	!;
+use vars qw($VERSION $REVISION);
+$VERSION = '1.00';
+$REVISION = '$Revision: 1.32.6.8 $';
+
+sub init_entry($$$$) {
+	my($blinternal, $type, $gid, $bid) = @_;
+
+	$blinternal->{$type} ||= tlv();
+	$blinternal->{$type}->{$gid} ||= tlv();
+	$blinternal->{$type}->{$gid}->{$bid} ||= {};
+	$blinternal->{$type}->{$gid}->{$bid}->{name} ||= "";
+	$blinternal->{$type}->{$gid}->{$bid}->{data} ||= tlv();
+}
 
 sub blparse($$) {
 	my($session, $data) = @_;
@@ -38,12 +38,13 @@ sub blparse($$) {
 	$session->{visibility} = VISMODE_PERMITALL; # If we don't have p/d data, this is default.
 
 	delete $session->{blinternal};
-	$session->{blinternal} = tlvtie BLI_AUTOVIV;
+	$session->{blinternal} = tlv();
 
 	while(length($data) > 4) {
 		my($name) = unpack("n/a*", $data);
 		substr($data, 0, 2+length($name)) = "";
 		my($gid, $bid, $type, $sublen) = unpack("n4", substr($data, 0, 8, ""));
+		init_entry($session->{blinternal}, $type, $gid, $bid);
 		my $typedata = tlv_decode(substr($data, 0, $sublen, ""));
 
 		$session->{blinternal}->{$type}->{$gid}->{$bid}->{name} = $name if $name;
@@ -96,10 +97,15 @@ sub BLI_to_NO($) {
 		my $groupperms = $typedata->{0xCB};
 		($session->{groupperms}) = unpack("N", $groupperms) if $groupperms;
 		$session->{profile} = $typedata->{0x0100} if exists($typedata->{0x0100});
+		($session->{icon_checksum}) = unpack("n", $typedata->{0x0101}) if exists($typedata->{0x0101});
+		($session->{icon_timestamp}) = unpack("N", $typedata->{0x0102}) if exists($typedata->{0x0102});
+		($session->{icon_length}) = unpack("N", $typedata->{0x0103}) if exists($typedata->{0x0103});
 
 		delete $typedata->{0xCB};
 		delete $typedata->{0xCA};
 		delete $typedata->{0x0100};
+		delete $typedata->{0x0101};
+		delete $typedata->{0x0102};
 		$session->{appdata} = $typedata;
 
 		$session->set_info($session->{profile}) if exists($session->{profile});
@@ -112,6 +118,10 @@ sub BLI_to_NO($) {
 	if(exists $bli->{5}) {
 		# Not yet implemented
 		($session->{showidle}) = unpack("N", $bli->{5}->{0}->{19719}->{data}->{0xC9} || pack("N", 1));
+	}
+
+	if(exists $bli->{0x14}) {
+		$session->{icon_md5sum} = $bli->{0x14}->{0}->{0x51F4}->{data}->{0xD5};
 	}
 
 	my @gids = unpack("n*", (exists($bli->{1}) and exists($bli->{1}->{0}) and exists($bli->{1}->{0}->{0}) and exists($bli->{1}->{0}->{0}->{data}->{0xC8})) ? $bli->{1}->{0}->{0}->{data}->{0xC8} : "");
@@ -159,11 +169,16 @@ sub BLI_to_NO($) {
 			$comment = $buddy->{data}->{0x13C} if exists($buddy->{data}->{0x13C});
 			delete $buddy->{data}->{0x13C};
 
+			my $alias = undef;
+			$alias = $buddy->{data}->{0x131} if exists($buddy->{data}->{0x131});
+			delete $buddy->{data}->{0x131};
+
 			$session->{buddies}->{$group}->{members}->{$buddy->{name}} ||= {};
 			my $entry = $session->{buddies}->{$group}->{members}->{$buddy->{name}};
 			$entry->{buddyid} = $bid;
 			$entry->{online} = 0 unless exists($entry->{online});
 			$entry->{comment} = $comment;
+			$entry->{alias} = $alias;
 			$entry->{data} = $buddy->{data};
 		}
 	}
@@ -175,33 +190,51 @@ sub BLI_to_NO($) {
 sub NO_to_BLI($) {
 	my $session = shift;
 
-	my $bli = tlvtie BLI_AUTOVIV;
+	my $bli = tlv();
 
 	foreach my $permit (keys %{$session->{permit}}) {
+		init_entry($bli, 2, 0, $session->{permit}->{$permit}->{buddyid});
 		$bli->{2}->{0}->{$session->{permit}->{$permit}->{buddyid}}->{name} = $permit;
 	}
 
 	foreach my $deny (keys %{$session->{deny}}) {
+		init_entry($bli, 3, 0, $session->{deny}->{$deny}->{buddyid});
 		$bli->{3}->{0}->{$session->{deny}->{$deny}->{buddyid}}->{name} = $deny;
 	}
 
 	my $vistype;
 	$vistype = (keys %{$session->{blinternal}->{4}->{0}})[0] if exists($session->{blinternal}->{4}) and exists($session->{blinternal}->{4}->{0}) and scalar keys %{$session->{blinternal}->{4}->{0}};
 	$vistype ||= int(rand(30000)) + 1;
+	init_entry($bli, 4, 0, $vistype);
 	$bli->{4}->{0}->{$vistype}->{data}->{0xCA} = pack("C", $session->{visibility} || VISMODE_PERMITALL);
 	$bli->{4}->{0}->{$vistype}->{data}->{0xCB} = pack("N", $session->{groupperms} || 0xFFFFFFFF);
+
+	#Net::OSCAR protocol extensions
 	$bli->{4}->{0}->{$vistype}->{data}->{0x0100} = $session->{profile} if $session->{profile};
+	$bli->{4}->{0}->{$vistype}->{data}->{0x0101} = pack("n", $session->{icon_checksum}) if $session->{icon_checksum};
+	$bli->{4}->{0}->{$vistype}->{data}->{0x0102} = pack("N", $session->{icon_timestamp}) if $session->{icon_timestamp};
+	$bli->{4}->{0}->{$vistype}->{data}->{0x0103} = pack("N", $session->{icon_length}) if $session->{icon_length};
+
 	foreach my $appdata(keys %{$session->{appdata}}) {
 		$bli->{4}->{0}->{$vistype}->{data}->{$appdata} = $session->{appdata}->{$appdata};
 	}
 
 	if(exists($session->{showidle})) {
+		init_entry($bli, 5, 0, 0x4D07);
 		$bli->{5}->{0}->{0x4D07}->{data}->{0xC9} = pack("N", $session->{showidle});
 	}
 
+	if(exists($session->{icon_md5sum})) {
+		init_entry($bli, 0x14, 0, 0x51F4);
+		$bli->{0x14}->{0}->{0x51F4}->{name} = "1";
+		$bli->{0x14}->{0}->{0x51F4}->{data}->{0xD5} = $session->{icon_md5sum};
+	}
+
+	init_entry($bli, 1, 0, 0);
 	$bli->{1}->{0}->{0}->{data}->{0xC8} = pack("n*", map { $_->{groupid} } values %{$session->{buddies}});
 	foreach my $group(keys %{$session->{buddies}}) {
 		my $gid = $session->{buddies}->{$group}->{groupid};
+		init_entry($bli, 1, $gid, 0);
 		$bli->{1}->{$gid}->{0}->{name} = $group;
 		$bli->{1}->{$gid}->{0}->{data}->{0xC8} = pack("n*",
 			map { $_->{buddyid} }
@@ -210,11 +243,13 @@ sub NO_to_BLI($) {
 		foreach my $buddy(keys %{$session->{buddies}->{$group}->{members}}) {
 			my $bid = $session->{buddies}->{$group}->{members}->{$buddy}->{buddyid};
 			next unless $bid;
+			init_entry($bli, 0, $gid, $bid);
 			$bli->{0}->{$gid}->{$bid}->{name} = $buddy;
 			while(my ($key, $value) = each(%{$session->{buddies}->{$group}->{members}->{$buddy}->{data}})) {
 				$bli->{0}->{$gid}->{$bid}->{data}->{$key} = $value;
 			}
 			$bli->{0}->{$gid}->{$bid}->{data}->{0x13C} = $session->{buddies}->{$group}->{members}->{$buddy}->{comment} if defined $session->{buddies}->{$group}->{members}->{$buddy}->{comment};
+			$bli->{0}->{$gid}->{$bid}->{data}->{0x131} = $session->{buddies}->{$group}->{members}->{$buddy}->{alias} if defined $session->{buddies}->{$group}->{members}->{$buddy}->{alias};
 		}
 	}
 
@@ -225,11 +260,9 @@ sub NO_to_BLI($) {
 sub BLI_to_OSCAR($$) {
 	my($session, $newbli) = @_;
 	my $oldbli = $session->{blinternal};
-	my $oscar = $session->{bos};
-	my $modcount = 0;
 	my (@adds, @modifies, @deletes);
-
-	$oscar->snac_put(family => 0x13, subtype => 0x11); # Begin BL mods
+        $session->crapout($session->{services}->{0+CONNTYPE_BOS}, "You must wait for a buddylist_ok or buddylist_error callback before calling commit_buddylist again.") if $session->{budmods};
+	$session->{budmods} = [];
 
 	# First, delete stuff that we no longer use and modify everything else
 	foreach my $type(keys %$oldbli) {
@@ -338,6 +371,7 @@ sub BLI_to_OSCAR($$) {
 			push @reqdata, $change->{reqdata};
 
 			if(length($packet) > 7*1024) {
+				#$session->log_print(OSCAR_DBG_INFO, "Adding to blmod queue (max packet size reached): type $type, payload size ", scalar(@reqdata));
 				push @packets, {
 					data => $packet,
 					reqdata => [@reqdata],
@@ -347,32 +381,31 @@ sub BLI_to_OSCAR($$) {
 			}
 		}
 		if($packet) {
+			#$session->log_print(OSCAR_DBG_INFO, "Adding to blmod queue (no more changes): type $type, payload size ", scalar(@reqdata));
 			push @packets, {
 				data => $packet,
 				reqdata => [@reqdata],
 			};
 		}
-		$modcount += @packets;
 
-		foreach my $packet(@packets) {
-			$oscar->snac_put(
-				family => 0x13,
-				subtype => $type,
-				reqdata => $packet->{reqdata},
-				data => $packet->{data}
-			);
-		}
+		push @{$session->{budmods}}, map {{family => 0x13, subtype => $type, reqdata => $_->{reqdata}, data => $_->{data}}} @packets
 	}
 
-	$oscar->snac_put(family => 0x13, subtype => 0x12); # End BL mods
+	push @{$session->{budmods}}, {family => 0x13, subtype => 0x12}; # End BL mods
+	#$session->log_print(OSCAR_DBG_INFO, "Adding terminator to blmod queue.");
 
 	$session->{blold} = $oldbli;
 	$session->{blinternal} = $newbli;
 
-	# OSCAR doesn't send an 0x13/0xE if we don't actually modify anything.
-	$session->callback_buddylist_ok() unless $modcount;
-
-	$session->{budmods} = $modcount;
+	if(@{$session->{budmods}} <= 1) { # We only have the start/end modification packets, no actual changes
+		#$session->log_print(OSCAR_DBG_INFO, "Empty blmod queue - calling buddylist_ok.");
+		delete $session->{budmods};
+		$session->callback_buddylist_ok();
+	} else {
+		#$session->log_print(OSCAR_DBG_INFO, "Non-empty blmod queue - sending initiator and first change packet.");
+		$session->svcdo(CONNTYPE_BOS, family => 0x13, subtype => 0x11); # Start buddylist modifications
+		$session->svcdo(CONNTYPE_BOS, %{shift @{$session->{budmods}}}); # Send the first modification
+	}
 }
 
 1;
