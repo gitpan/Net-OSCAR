@@ -1,6 +1,6 @@
 package Net::OSCAR::Callbacks;
 
-$VERSION = 0.25;
+$VERSION = 0.50;
 
 use strict;
 use vars qw($VERSION);
@@ -135,6 +135,9 @@ sub process_snac($$) {
 			delete $session->{admin_queue};
 		} elsif($conntype == CONNTYPE_CHAT) {
 			$connection->ready();
+
+			# We don't get the 0x0E/0x02 callback for exchange 5 chats until it's too late
+			$session->callback_chat_joined($connection->name, $connection) if $connection->exchange == 5;
 		}
 	} elsif($subtype == 0x1) {
 		$subtype = $reqid >> 16;
@@ -275,11 +278,22 @@ sub process_snac($$) {
 		#$connection->snac_put(family => 0x13, subtype => 0x7);
 	} elsif($family == 0x13 and $subtype == 0x6) {
 		$connection->log_print(OSCAR_DBG_SIGNON, "Got buddylist.");
-		delete $session->{gotbl};
 
-		return unless Net::OSCAR::_BLInternal::blparse($session, $data);
-		$connection->snac_put(family => 0x13, subtype => 0x7);
-		got_buddylist($session, $connection);
+		$session->{blarray} = [] unless exists($session->{blarray});
+		substr($data, 0, 3) = "";
+		substr($data, -4, 4) = "" if $snac->{flags2};
+		$session->{blarray}->[$snac->{flags2}] = $data;
+
+		if($snac->{flags2}) {
+			$connection->log_print(OSCAR_DBG_SIGNON, "Got buddylist part - need $snac->{flags2} more parts.");
+		} else {
+			delete $session->{gotbl};
+
+			return unless Net::OSCAR::_BLInternal::blparse($session, join("", reverse @{$session->{blarray}}));
+			delete $session->{blarray};
+			$connection->snac_put(family => 0x13, subtype => 0x7);
+			got_buddylist($session, $connection);
+		}
 	} elsif($family == 0x13 and $subtype == 0x0E) {
 		$session->{budmods}--;
 		$connection->log_print(OSCAR_DBG_DEBUG, "Got blmod ack ($session->{budmods} left).");
@@ -373,7 +387,7 @@ sub process_snac($$) {
 		my($tlvcount) = unpack("n", substr($data, 0, 2, ""));
 		my $tlv = tlv_decode($data);
 
-		$session->callback_chat_joined($connection->{name}, $connection);
+		$session->callback_chat_joined($connection->{name}, $connection) unless $connection->exchange == 5;
 
 		my $occupants = 0;
 		($occupants) = unpack("n", $tlv->{0x6F}) if $tlv->{0x6F};

@@ -1,15 +1,13 @@
 package Net::OSCAR::Connection;
 
-$VERSION = 0.25;
+$VERSION = 0.50;
 
 use strict;
 use vars qw($VERSION);
 use Carp;
-use Socket;
-use Symbol;
 use Digest::MD5;
-use Fcntl;
 use POSIX qw(:errno_h);
+use IO::Socket;
 
 use Net::OSCAR::Common qw(:all);
 use Net::OSCAR::TLV;
@@ -50,6 +48,9 @@ sub flap_encode($$;$) {
 
 sub flap_put($$;$) {
 	my($self, $msg, $channel) = @_;
+
+	return unless $self->{socket} and $self->{socket}->opened and $self->{socket}->connected and !$self->{socket}->error;
+
 	my $emsg = $self->flap_encode($msg, $channel);
 	syswrite($self->{socket}, $emsg, length($emsg)) or return $self->{session}->crapout($self, "Couldn't write to socket: $!");
 	$self->log_print(OSCAR_DBG_PACKETS, "Put ", hexdump($emsg));
@@ -174,21 +175,7 @@ sub disconnect($) {
 	$self->{session}->delconn($self);
 }
 
-sub set_blocking($$) {
-	my $self = shift;
-	my $blocking = shift;
-	my $flags = 0;
-
-	fcntl($self->{socket}, F_GETFL, $flags);
-	if($blocking) {
-		$flags &= ~O_NONBLOCK;
-	} else {
-		$flags |= O_NONBLOCK;
-	}
-	fcntl($self->{socket}, F_SETFL, $flags);
-
-	return $self->{socket};
-}
+sub set_blocking($$) { shift->{socket}->blocking(shift); }
 
 sub connect($$) {
 	my($self, $host) = @_;
@@ -216,17 +203,17 @@ sub connect($$) {
 	$self->{port} = $port;
 
 	$self->log_print(OSCAR_DBG_NOTICE, "Connecting to $host:$port.");
-	$self->{socket} = gensym;
-	socket($self->{socket}, PF_INET, SOCK_STREAM, getprotobyname('tcp'));
+	$self->{socket} = IO::Socket::INET->new;
+	$self->{socket}->configure; # Needed in order to be able to set blocking
 
 	$self->{ready} = 0;
 	$self->{connected} = 0;
 
 	$self->set_blocking(0);
-	my $addr = inet_aton($host) or return $self->{session}->crapout($self, "Couldn't resolve $host.");
-	if(!connect($self->{socket}, sockaddr_in($port, $addr))) {
+	
+	if(!$self->{socket}->configure({PeerAddr => $host, PeerPort => $port})) {
 		return 1 if $! == EINPROGRESS;
-		croak "Couldn't connect to $host:$port: $!";
+		croak "Couldn't connect to $host:$port: $@";
 	}
 
 	return 1;

@@ -1,6 +1,6 @@
 package Net::OSCAR;
 
-$VERSION = 0.25;
+$VERSION = 0.50;
 
 =head1 NAME
 
@@ -1182,9 +1182,18 @@ sub chat_join($$; $) {
 	my $reqid = (8<<16) | (unpack("n", randchars(2)))[0];
 	$self->{chats}->{pack("N", $reqid)} = $name;
 	$self->svcdo(CONNTYPE_CHATNAV, family => 0x0D, subtype => 0x08, reqid => $reqid, data =>
-		pack("n Ca*n3C na*", $exchange,
-			length("create"), "create", 0xFFFF, 0x100, 0x100, 0xD3,
-			length($name), $name
+		#pack("n Ca*n3C na*", $exchange,
+		#	length("create"), "create", 0xFFFF, 0x100, 0x100, 0xD3,
+		#	length($name), $name
+		#)
+
+		pack("n Ca*n2C a*", $exchange,
+			length("create"), "create", 0xFFFF, 0x100, 0x03,
+			tlv(
+				0xD7 => "en",
+				0xD6 => "us-ascii",
+				0xD3 => $name
+			)
 		)
 	);
 }
@@ -1747,6 +1756,11 @@ with the chat_joined that C<Net::OSCAR> sends when you've join the chatroom.
 
 Returns the name of the chatroom.
 
+=item exchange
+
+Returns the exchange of the chatroom.
+This is normally 4 but can be 5 for certain chatrooms.
+
 =back
 
 =head1 CONSTANTS
@@ -1885,6 +1899,38 @@ of C<Net::OSCAR::Connection>, not C<Net::OSCAR>.
 =head1 HISTORY
 
 =over 4
+
+=item *
+
+0.50, 2001-12-23
+
+=over 4
+
+=item *
+
+Fixes for the "crap out on 'connection reset by peer'" and "get stuck and slow down in Perl_sv_2bool" bugs!
+
+=item *
+
+Correct handling of very large (over 100 items) buddylists.
+
+=item *
+
+We can now join exchange 5 chats.
+
+=item *
+
+Fixes in modifying permit mode.
+
+=item *
+
+Updated copyright notice courtesy of AOL's lawyers.
+
+=item *
+
+Switch to IO::Socket for portability in set_blocking.
+
+=back
 
 =item *
 
@@ -2239,9 +2285,9 @@ developers of third-party clients.
 
 Copyright (c) 2001 Matthew Sachs.  All rights reserved.
 This program is free software; you can redistribute it and/or modify it under the
-same terms as Perl itself.  AOL Instant Messenger and AIM are registered service marks
-of AOL/Time Warner.  America OnLine is a registered trademark of AOL/Time Warner.
-C<Net::OSCAR> is not affiliated with, endorsed by, or supported by AOL.
+same terms as Perl itself.  B<AOL> and B<AMERICA ONLINE> are registered trademarks
+owned by America Online, Inc.  The B<INSTANT MESSENGER> mark is owned by America
+Online, Inc.  C<Net::OSCAR> is not endorsed by, or affiliated with, America Online, Inc.
 
 =cut
 
