@@ -801,6 +801,15 @@ MISCELLANEOUS
         method of "Net::OSCAR::Connection", not "Net::OSCAR".
 
 HISTORY
+    *   0.57, 2002-01-16
+
+        *   Send callback_chat_joined correctly when joining an existing
+            chat
+
+        *   Don't activate OldPerl fixes for perl 5.6.0
+
+        *   Ignore chats that we're already in
+
     *   0.56, 2002-01-16
 
         *   Fixed rate handling
