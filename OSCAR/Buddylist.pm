@@ -1,6 +1,6 @@
 package Net::OSCAR::Buddylist;
 
-$VERSION = 0.08;
+$VERSION = 0.09;
 
 use strict;
 use vars qw($VERSION);
@@ -35,6 +35,7 @@ sub TIEHASH {
 
 sub FETCH {
 	my($self, $key) = @_;
+	return undef unless $key;
 	$self->{DATA}->{$self->{nonorm} ? $key : normalize($key)};
 }
 

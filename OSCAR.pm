@@ -1,6 +1,6 @@
 package Net::OSCAR;
 
-$VERSION = 0.08;
+$VERSION = 0.09;
 
 =head1 NAME
 
@@ -152,7 +152,7 @@ sub new($) {
 	shift;
 	my $self = { };
 	bless $self, $class;
-	$self->{DEBUG} = 0;
+	$self->{LOGLEVEL} = 0;
 	$self->{SNDEBUG} = 0;
 	$self->{description} = "OSCAR session";
 
@@ -217,19 +217,22 @@ sub signoff($) {
 
 =pod
 
-=item debug (DEBUGLEVEL[, SCREENNAME DEBUG])
+=item loglevel ([LOGLEVEL[, SCREENNAME DEBUG]])
 
-Sets the debugging level.  If this is non-zero, lots of information will be printed
-to standard error.  In theory, higher debugging levels will give you more information,
-but right now it's all or nothing.  If the optional screenname debug parameter is non-zero,
+Gets or sets the loglevel.  If this is non-zero, varing amounts of information will be printed
+to standard error (unless you have a L<"log"> callback defined).  Higher loglevels will give you more information.
+If the optional screenname debug parameter is non-zero,
 debug messages will be prepended with the screenname of the OSCAR session which is generating
-the message.  This is useful when you have multiple C<Net::OSCAR> objects.
+the message (but only if you don't have a L<"log"> callback defined).  This is useful when you have multiple C<Net::OSCAR> objects.
+
+See the L<"log"> callback for more information.
 
 =cut
 
-sub debug($$;$) {
+sub loglevel($;$$) {
 	my $self = shift;
-	$self->{DEBUG} = shift;
+	return $self->{LOGLEVEL} unless @_;
+	$self->{LOGLEVEL} = shift;
 	$self->{SNDEBUG} = shift if @_;
 }
 
@@ -257,7 +260,7 @@ sub delconn($$) {
 	for(my $i = scalar @{$self->{connections}} - 1; $i >= 0; $i--) {
 		next unless !$connection->{socket} or (fileno $connection->{socket} == fileno $self->{connections}->[$i]->{socket});
 		next unless $connection->{conntype} == $self->{connections}->[$i]->{conntype}; # Just in case fileno is undef.
-		$connection->debug_print("Closing.");
+		$connection->log_print(OSCAR_DBG_NOTICE, "Closing.");
 		splice @{$self->{connections}}, $i, 1;
 		if(!$connection->{sockerr}) {
 			eval {
@@ -287,7 +290,7 @@ sub DESTROY {
 	foreach my $connection(@{$self->{connections}}) {
 		next unless $connection->{socket} and not $connection->{sockerr};
 		$connection->flap_put("", FLAP_CHAN_CLOSE);
-		$connection->{socket}->close;
+		close $connection->{socket} if $connection->{socket};
 	}
 }
 
@@ -361,6 +364,7 @@ sub do_one_loop($) {
 	my($rin, $win, $ein) = ('', '', '');
 
 	foreach my $connection(@{$self->{connections}}) {
+		next unless exists($connection->{socket});
 		if($connection->{connected}) {
 			vec($rin, fileno $connection->{socket}, 1) = 1;
 		} else {
@@ -379,9 +383,9 @@ sub findgroup($$) {
 
 	my $thegroup = undef;
 
-	$self->debug_printf("findgroup 0x%04X", $groupid);
+	$self->log_printf(OSCAR_DBG_DEBUG, "findgroup 0x%04X", $groupid);
 	while(($group, $currgroup) = each(%{$self->{buddies}})) {
-		$self->debug_printf("\t$group == 0x%04X", $currgroup->{groupid});
+		$self->log_printf(OSCAR_DBG_DEBUG, "\t$group == 0x%04X", $currgroup->{groupid});
 		next unless exists($currgroup->{groupid}) and $groupid == $currgroup->{groupid};
 		$thegroup = $group;
 		last;
@@ -404,7 +408,7 @@ groups, will return the first one we find.
 sub findbuddy($$) {
 	my($self, $buddy) = @_;
 
-	#$self->debug_print("findbuddy $buddy");
+	#$self->log_print(OSCAR_DBG_DEBUG, "findbuddy $buddy");
 	foreach my $group(keys %{$self->{buddies}}) {
 		#$self->debug_print("\t$buddy? ", join(",", keys %{$self->{buddies}->{$group}->{members}}));
 		return $group if $self->{buddies}->{$group}->{members}->{$buddy};
@@ -509,6 +513,10 @@ sub get_denylist(@) { return keys %{shift->{deny}}; }
 
 =pod
 
+=item rename_group (OLDNAME, NEWNAME)
+
+Renames a group.  Call L<"commit_buddylist"> for the change to take effect.
+
 =item add_buddy (GROUP, BUDDIES)
 
 Adds buddies to the given group on your buddylist.  Call L<"commit_buddylist">
@@ -519,6 +527,13 @@ for the change to take effect.
 See L<add_buddy>.
 
 =cut
+
+sub rename_group($$$) {
+	my($self, $oldgroup, $newgroup) = @_;
+	return send_error($self, $self->{bos}, 0, "That group does not exist", 0) unless exists $self->{buddies}->{$oldgroup};
+	$self->{buddies}->{$newgroup} = $self->{buddies}->{$oldgroup};
+	delete $self->{buddies}->{$oldgroup};
+}
 
 sub add_buddy($$@) {
 	my($self, $group, @buddies) = @_;
@@ -737,12 +752,12 @@ sub extract_userinfo($$) {
 	$retval->{screenname} = new Net::OSCAR::Screenname $retval->{screenname};
 	$retval->{evil} /= 10;
 	substr($data, 0, 5+length($retval->{screenname})) = "";
-	$self->debug_print("Decoding userinfo TLV with tlvcnt $tlvcnt.");
+	$self->log_print(OSCAR_DBG_DEBUG, "Decoding userinfo TLV with tlvcnt $tlvcnt.");
 
 	my($tlv, $chainlen) = tlv_decode($data, $tlvcnt);
 	#$chainlen--;
 
-	$self->debug_print("Done decoding userinfo TLV - chainlen $chainlen.");
+	$self->log_print(OSCAR_DBG_DEBUG, "Done decoding userinfo TLV - chainlen $chainlen.");
 	my($flags) = unpack("n", $tlv->{1});
 	$retval->{trial} = $flags & 0x1;
 	$retval->{admin} = $flags & 0x2;
@@ -857,17 +872,17 @@ sub im_parse($$) {
 		carp "Got ICBM on unsupported channel $channel - ignoring.";
 		return;
 	} else {
-		$self->debug_print("Incoming ICBM on channel $channel.");
+		$self->log_print(OSCAR_DBG_DEBUG, "Incoming ICBM on channel $channel.");
 	}
 
-	$self->debug_print("Extracting user info.");
+	$self->log_print(OSCAR_DBG_DEBUG, "Extracting user info.");
 	my ($senderinfo, $tlvlen) = $self->extract_userinfo($data);
 	$from = $senderinfo->{screenname};
 
 	# Copying gAIM/libfaim is *so* much easier than understanding stuff.
 	if($channel == 1) {
 		substr($data, 0, $tlvlen) = "";
-		$self->debug_print("Decoding ICBM secondary TLV.");
+		$self->log_print(OSCAR_DBG_DEBUG, "Decoding ICBM secondary TLV.");
 
 		my $tlv = tlv_decode($data);
 		$msg = $tlv->{2};
@@ -881,7 +896,7 @@ sub im_parse($$) {
 
 		$away = 1 if exists $tlv->{4};
 		if($tlv->{3}) { # server ack requested
-			#$self->debug_print("Sending message ack.");
+			#$self->log_print(OSCAR_DBG_DEBUG, "Sending message ack.");
 			#$self->{bos}->snac_put(family => 0x4, subtype => 0xC, data =>
 			#	$cookie . pack("nCa*", 1, length($from), $from)
 			#);
@@ -978,7 +993,7 @@ sub set_info($$;$) {
 
 	$tlv{0x5} = $self->capabilities();
 
-	$self->debug_print("Setting user information.");
+	$self->log_print(OSCAR_DBG_NOTICE, "Setting user information.");
 	$self->{bos}->snac_put(family => 0x02, subtype => 0x04, data => tlv_encode(\%tlv));
 }
 
@@ -1002,7 +1017,7 @@ sub svcdo($$%) {
 sub svcreq($$) {
         my($self, $svctype) = @_;
 
-        $self->debug_print("Sending service request for servicetype $svctype.");
+        $self->log_print(OSCAR_DBG_INFO, "Sending service request for servicetype $svctype.");
         $self->{bos}->snac_put(family => 0x1, subtype => 0x4, data => pack("n", $svctype));
 }
 
@@ -1113,7 +1128,7 @@ sub chat_join($$; $) {
 	my($self, $name, $exchange) = @_;
 	$exchange ||= 4;
 
-	$self->debug_print("Creating chatroom $name ($exchange).");
+	$self->log_print(OSCAR_DBG_INFO, "Creating chatroom $name ($exchange).");
 	my $reqid = (8<<16) | (unpack("n", randchars(2)))[0];
 	$self->{chats}->{pack("N", $reqid)} = $name;
 	$self->svcdo(CONNTYPE_CHATNAV, family => 0x0D, subtype => 0x08, reqid => $reqid, data =>
@@ -1135,7 +1150,7 @@ Use this to accept an invitation to join a chatroom.
 sub chat_accept($$) {
 	my($self, $chat) = @_;
 
-	$self->debug_print("Accepting chat invite for $chat.");
+	$self->log_print(OSCAR_DBG_INFO, "Accepting chat invite for $chat.");
 	$self->svcdo(CONNTYPE_CHATNAV, family => 0x0D, subtype => 0x04, data =>
 		pack("nca* Cn", 4, length($chat), $chat, 0, 2)
 	);
@@ -1168,7 +1183,7 @@ sub set_idle($$) {
 =item clone
 
 Clones the object.  This creates a new C<Net::OSCAR> object whose callbacks,
-debug level, screenname debugging, and timeout are the same as those of the
+loglevel, screenname debugging, and timeout are the same as those of the
 current object.  This is provided as a convenience when using multiple
 C<Net::OSCAR> objects in order to allow you to set those parameters once
 and then call the L<signon> method on the object returned by clone.
@@ -1185,7 +1200,7 @@ sub clone($) {
 	# If we did that, changing ourself would change the clone.
 	$clone->{callbacks} = { %{$self->{callbacks}} };
 
-	$clone->{DEBUG} = $self->{DEBUG};
+	$clone->{LOGLEVEL} = $self->{LOGLEVEL};
 	$clone->{SNDEBUG} = $self->{SNDEBUG};
 	$clone->{timeout} = $self->{timeout};
 
@@ -1389,7 +1404,7 @@ when using multiple C<Net::OSCAR> objects.
 
 Called when any sort of error occurs (except see L<admin_error> below.)
 
-C<CONNECTION> is the particular connection which generated the error - the C<debug_print> method of
+C<CONNECTION> is the particular connection which generated the error - the C<log_print> method of
 C<Net::OSCAR::Connection> may be useful, as may be getting C<$connection->{description}>.
 C<DESCRIPTION> is a nicely formatted description of the error.  C<ERROR> is an error number.
 
@@ -1458,6 +1473,10 @@ Called when a buddy has signed off (or added us to their deny list.)
 
 Called when someone leaves a chatroom.
 
+=item im_ok (OSCAR, TO)
+
+Called when an IM to C<TO> is successfully sent.
+
 =item im_in (OSCAR, FROM, MESSAGE[, AWAY])
 
 Called when someone sends you an instant message.  If the AWAY parameter
@@ -1502,11 +1521,48 @@ may be present.
 
 Called when the user is completely signed on to the service.
 
-=item debug_print(OSCAR, MESSAGE)
+=item log(OSCAR, LEVEL, MESSAGE)
 
-Use this callback if you don't want the debug_print methods to just print to STDERR.
+Use this callback if you don't want the log_print methods to just print to STDERR.
+It is called when even C<MESSAGE> of level C<LEVEL> is called.  The levels are,
+in order of increasing importance:
+
+=over 4
+
+=item OSCAR_DBG_NONE
+
+Really only useful for setting in the L<"loglevel"> method.  No information will
+be logged.  The default loglevel.
+
+=item OSCAR_DBG_PACKETS
+
+Hex dumps of all incoming/outgoing packets.
+
+=item OSCAR_DBG_DEBUG
+
+Information useful for debugging C<Net::OSCAR>, and precious little else.
+
+=item OSCAR_DBG_SIGNON
+
+Like C<OSCAR_DBG_NOTICE>, but only for the signon process; this is where
+problems are most likely to occur, so we provide this for the common case of
+people who only want a lot of information during signon.  This may be deprecated
+some-day and be replaced by a more flexible facility/level system, ala syslog.
+
+=item OSCAR_DBG_NOTICE
+
+=item OSCAR_DBG_INFO
+
+=item OSCAR_DBG_WARN
 
 =back
+
+Note that these symbols are imported into your namespace if and only if you use
+the C<:loglevels> or <:all> tags when importing the module (e.g. C<use Net::OSCAR qw(:standard :loglevels)>.)
+
+Also note that this callback is only triggered for events whose level is greater
+than or equal to the loglevel for the OSCAR session.  The L<"loglevel"> method
+allows you to get or set the loglevel.
 
 =cut
 
@@ -1535,7 +1591,8 @@ sub callback_admin_error(@) { do_callback("admin_error", @_); }
 sub callback_admin_ok(@) { do_callback("admin_ok", @_); }
 sub callback_rate_alert(@) { do_callback("rate_alert", @_); }
 sub callback_signon_done(@) { do_callback("signon_done", @_); }
-sub callback_debug_print(@) { do_callback("debug_print", @_); }
+sub callback_log(@) { do_callback("log", @_); }
+sub callback_im_ok(@) { do_callback("im_ok", @_); }
 
 sub set_callback_error($\&) { set_callback("error", @_); }
 sub set_callback_buddy_in($\&) { set_callback("buddy_in", @_); }
@@ -1555,7 +1612,8 @@ sub set_callback_admin_error($\&) { set_callback("admin_error", @_); }
 sub set_callback_admin_ok($\&) { set_callback("admin_ok", @_); }
 sub set_callback_rate_alert($\&) { set_callback("rate_alert", @_); }
 sub set_callback_signon_done($\&) { set_callback("signon_done", @_); }
-sub set_callback_debug_print($\&) { set_callback("debug_print", @_); }
+sub set_callback_log($\&) { set_callback("log", @_); }
+sub set_callback_im_ok($\&) { set_callback("im_ok", @_); }
 
 =pod
 
@@ -1715,6 +1773,46 @@ you use the string comparison operators (eq, ne, cmp, etc.)
 =head1 HISTORY
 
 =over 4
+
+=item *
+
+0.09, 2001-10-01
+
+=over 4
+
+=item *
+
+Crash and undefined value fixes
+
+=item *
+
+New method: im_ok
+
+=item *
+
+New method: rename_group, should fix "Couldn't get group name" error.
+
+=item *
+
+Fix for buddy_in callback and data
+
+=item *
+
+Better error handling when we can't resolve a host
+
+=item *
+
+Vastly improved logging infrastructure - debug_print(f) replaced with log_print(f). debug_print callback is now called log and has an extra parameter.
+
+=item *
+
+Fixed MANIFEST - we don't actually use Changes (and we do use Screenname.pm)
+
+=item *
+
+blinternal now automagically enforces the proper structure (the right things become Net::OSCAR::TLV tied hashes and the name and data keys are automatically created) upon vivification.  So, you can do $bli->{0}->{1}->{2}->{data}->{0x3} = "foo" without worrying if 0, 1, 2, or data have been tied.  Should close bug #47.
+
+=back
 
 =item *
 

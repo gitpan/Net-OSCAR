@@ -1,7 +1,7 @@
 package Net::OSCAR::Chat;
 
 
-$VERSION = 0.08;
+$VERSION = 0.09;
 
 use strict;
 use warnings;
@@ -18,7 +18,7 @@ sub invite($$;$) {
 	my $packet = "";
 	$message ||= "Join me in this Buddy Chat";
 
-	$self->debug_print("Inviting $who to join us.");
+	$self->log_print(OSCAR_DBG_DEBUG, "Inviting $who to join us.");
 
 	$packet .= randchars(8);
 	$packet .= pack("nCa*", 2, length($who), $who);

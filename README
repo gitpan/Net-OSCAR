@@ -122,14 +122,17 @@ METHODS
     signoff
         Sign off from the OSCAR service.
 
-    debug (DEBUGLEVEL[, SCREENNAME DEBUG])
-        Sets the debugging level. If this is non-zero, lots of information
-        will be printed to standard error. In theory, higher debugging
-        levels will give you more information, but right now it's all or
-        nothing. If the optional screenname debug parameter is non-zero,
-        debug messages will be prepended with the screenname of the OSCAR
-        session which is generating the message. This is useful when you
-        have multiple "Net::OSCAR" objects.
+    loglevel ([LOGLEVEL[, SCREENNAME DEBUG]])
+        Gets or sets the loglevel. If this is non-zero, varing amounts of
+        information will be printed to standard error (unless you have a the
+        section on "log" callback defined). Higher loglevels will give you
+        more information. If the optional screenname debug parameter is
+        non-zero, debug messages will be prepended with the screenname of
+        the OSCAR session which is generating the message (but only if you
+        don't have a the section on "log" callback defined). This is useful
+        when you have multiple "Net::OSCAR" objects.
+
+        See the the section on "log" callback for more information.
 
     process_connections (READERSREF, WRITERSREF, ERRORSREF)
         Use this method when you want to implement your own "select"
@@ -200,6 +203,10 @@ METHODS
 
     get_denylist
         Returns a list of all members of the deny list.
+
+    rename_group (OLDNAME, NEWNAME)
+        Renames a group. Call the section on "commit_buddylist" for the
+        change to take effect.
 
     add_buddy (GROUP, BUDDIES)
         Adds buddies to the given group on your buddylist. Call the section
@@ -369,11 +376,11 @@ METHODS
 
     clone
         Clones the object. This creates a new "Net::OSCAR" object whose
-        callbacks, debug level, screenname debugging, and timeout are the
-        same as those of the current object. This is provided as a
-        convenience when using multiple "Net::OSCAR" objects in order to
-        allow you to set those parameters once and then call the the signon
-        manpage method on the object returned by clone.
+        callbacks, loglevel, screenname debugging, and timeout are the same
+        as those of the current object. This is provided as a convenience
+        when using multiple "Net::OSCAR" objects in order to allow you to
+        set those parameters once and then call the the signon manpage
+        method on the object returned by clone.
 
     selector_filenos
         Returns a list whose first element is a vec of all filehandles that
@@ -484,10 +491,10 @@ CALLBACKS
         manpage below.)
 
         "CONNECTION" is the particular connection which generated the error
-        - the "debug_print" method of "Net::OSCAR::Connection" may be
-        useful, as may be getting "$connection-"{description}>.
-        "DESCRIPTION" is a nicely formatted description of the error.
-        "ERROR" is an error number.
+        - the "log_print" method of "Net::OSCAR::Connection" may be useful,
+        as may be getting "$connection-"{description}>. "DESCRIPTION" is a
+        nicely formatted description of the error. "ERROR" is an error
+        number.
 
         If "FATAL" is non-zero, the error was fatal and the connection to
         OSCAR has been closed.
@@ -553,6 +560,9 @@ CALLBACKS
     chat_buddy_out (OSCAR, SCREENNAME, CHAT)
         Called when someone leaves a chatroom.
 
+    im_ok (OSCAR, TO)
+        Called when an IM to "TO" is successfully sent.
+
     im_in (OSCAR, FROM, MESSAGE[, AWAY])
         Called when someone sends you an instant message. If the AWAY
         parameter is non-zero, the message was generated as an automatic
@@ -592,242 +602,307 @@ CALLBACKS
     signon_done(OSCAR)
         Called when the user is completely signed on to the service.
 
-    debug_print(OSCAR, MESSAGE)
-        Use this callback if you don't want the debug_print methods to just
-        print to STDERR.
+    log(OSCAR, LEVEL, MESSAGE)
+        Use this callback if you don't want the log_print methods to just
+        print to STDERR. It is called when even "MESSAGE" of level "LEVEL"
+        is called. The levels are, in order of increasing importance:
+
+        OSCAR_DBG_NONE
+            Really only useful for setting in the the section on "loglevel"
+            method. No information will be logged. The default loglevel.
+
+        OSCAR_DBG_PACKETS
+            Hex dumps of all incoming/outgoing packets.
+
+        OSCAR_DBG_DEBUG
+            Information useful for debugging "Net::OSCAR", and precious
+            little else.
+
+        OSCAR_DBG_SIGNON
+            Like "OSCAR_DBG_NOTICE", but only for the signon process; this
+            is where problems are most likely to occur, so we provide this
+            for the common case of people who only want a lot of information
+            during signon. This may be deprecated some-day and be replaced
+            by a more flexible facility/level system, ala syslog.
+
+        OSCAR_DBG_NOTICE
+        OSCAR_DBG_INFO
+        OSCAR_DBG_WARN
+        Note that these symbols are imported into your namespace if and only
+        if you use the ":loglevels" or <:all> tags when importing the module
+        (e.g. "use Net::OSCAR qw(:standard :loglevels)".)
+
+        Also note that this callback is only triggered for events whose
+        level is greater than or equal to the loglevel for the OSCAR
+        session. The the section on "loglevel" method allows you to get or
+        set the loglevel.
 
 CHATS
-    Aside from the methods listed here, there are a couple of methods of the
-    "Net::OSCAR::Chat" object that are important for implementing chat
-    functionality. "Net::OSCAR::Chat" is a descendent of
-    "Net::OSCAR::Connection".
+        Aside from the methods listed here, there are a couple of methods of
+        the "Net::OSCAR::Chat" object that are important for implementing
+        chat functionality. "Net::OSCAR::Chat" is a descendent of
+        "Net::OSCAR::Connection".
 
-    invite (WHO, MESSAGE)
-        Invite somebody into the chatroom.
+        invite (WHO, MESSAGE)
+            Invite somebody into the chatroom.
 
-    chat_send (MESSAGE[, NOREFLECT[, AWAY]])
-        Sends a message to the chatroom. If the NOREFLECT parameter is
-        present, you will not receive the message as an incoming message
-        from the chatroom. If AWAY is present, the message was generated as
-        an automatic reply, perhaps because you have an away message set.
+        chat_send (MESSAGE[, NOREFLECT[, AWAY]])
+            Sends a message to the chatroom. If the NOREFLECT parameter is
+            present, you will not receive the message as an incoming message
+            from the chatroom. If AWAY is present, the message was generated
+            as an automatic reply, perhaps because you have an away message
+            set.
 
-    part
-        Leave the chatroom.
+        part
+            Leave the chatroom.
 
-    url Returns the URL for the chatroom. Use this to associate a chat
-        invitation with the chat_joined that "Net::OSCAR" sends when you've
-        join the chatroom.
+        url Returns the URL for the chatroom. Use this to associate a chat
+            invitation with the chat_joined that "Net::OSCAR" sends when
+            you've join the chatroom.
 
-    name
-        Returns the name of the chatroom.
+        name
+            Returns the name of the chatroom.
 
 CONSTANTS
-    The following constants are defined when "Net::OSCAR" is imported with
-    the ":standard" tag. Unless indicated otherwise, the constants are
-    magical scalars - they return different values in string and numeric
-    contexts (for instance, an error message and an error number.)
+        The following constants are defined when "Net::OSCAR" is imported
+        with the ":standard" tag. Unless indicated otherwise, the constants
+        are magical scalars - they return different values in string and
+        numeric contexts (for instance, an error message and an error
+        number.)
 
-    ADMIN_TYPE_PASSWORD_CHANGE
-    ADMIN_TYPE_EMAIL_CHANGE
-    ADMIN_TYPE_SCREENNAME_FORMAT
-    ADMIN_TYPE_ACCOUNT_CONFIRM
-    ADMIN_ERROR_UNKNOWN
-    ADMIN_ERROR_BADPASS
-    ADMIN_ERROR_BADINPUT
-    ADMIN_ERROR_BADLENGTH
-    ADMIN_ERROR_TRYLATER
-    ADMIN_ERROR_REQPENDING
-    ADMIN_ERROR_CONNREF
-    VISMODE_PERMITALL
-    VISMODE_DENYALL
-    VISMODE_PERMITSOME
-    VISMODE_DENYSOME
-    VISMODE_PERMITBUDS
-    RATE_CLEAR
-    RATE_ALERT
-    RATE_LIMIT
-    RATE_DISCONNECT
-    GROUPPERM_OSCAR
-    GROUPPERM_AOL
+        ADMIN_TYPE_PASSWORD_CHANGE
+        ADMIN_TYPE_EMAIL_CHANGE
+        ADMIN_TYPE_SCREENNAME_FORMAT
+        ADMIN_TYPE_ACCOUNT_CONFIRM
+        ADMIN_ERROR_UNKNOWN
+        ADMIN_ERROR_BADPASS
+        ADMIN_ERROR_BADINPUT
+        ADMIN_ERROR_BADLENGTH
+        ADMIN_ERROR_TRYLATER
+        ADMIN_ERROR_REQPENDING
+        ADMIN_ERROR_CONNREF
+        VISMODE_PERMITALL
+        VISMODE_DENYALL
+        VISMODE_PERMITSOME
+        VISMODE_DENYSOME
+        VISMODE_PERMITBUDS
+        RATE_CLEAR
+        RATE_ALERT
+        RATE_LIMIT
+        RATE_DISCONNECT
+        GROUPPERM_OSCAR
+        GROUPPERM_AOL
 Net::AIM Compatibility
-    Here are the major differences between the "Net::OSCAR" interface and
-    the "Net::AIM" interface:
+        Here are the major differences between the "Net::OSCAR" interface
+        and the "Net::AIM" interface:
 
-    *   No get/set method.
+        *   No get/set method.
 
-    *   No newconn/getconn method.
+        *   No newconn/getconn method.
 
-    *   No group parameter for add_permit or add_deny.
+        *   No group parameter for add_permit or add_deny.
 
-    *   Many differences in chat handling.
+        *   Many differences in chat handling.
 
-    *   No chat_whisper.
+        *   No chat_whisper.
 
-    *   No encode method - it isn't needed.
+        *   No encode method - it isn't needed.
 
-    *   No send_config method - it isn't needed.
+        *   No send_config method - it isn't needed.
 
-    *   No send_buddies method - we don't keep a separate local buddylist.
+        *   No send_buddies method - we don't keep a separate local
+            buddylist.
 
-    *   No normalize method - it isn't needed. Okay, there is a normalize
-        function in "Net::OSCAR::Common", but I can't think of any reason
-        why it would need to be used outside of the module internals.
+        *   No normalize method - it isn't needed. Okay, there is a
+            normalize function in "Net::OSCAR::Common", but I can't think of
+            any reason why it would need to be used outside of the module
+            internals.
 
-    *   Different callbacks with different parameters.
+        *   Different callbacks with different parameters.
 
 MISCELLANEOUS
-    There are two programs included with the "Net::OSCAR" distribution.
-    oscartest is a minimalist implementation of a "Net::OSCAR" client.
-    snacsnatcher is a tool designed for analyzing the OSCAR protocol from
-    libpcap-format packet captures.
+        There are two programs included with the "Net::OSCAR" distribution.
+        oscartest is a minimalist implementation of a "Net::OSCAR" client.
+        snacsnatcher is a tool designed for analyzing the OSCAR protocol
+        from libpcap-format packet captures.
 
-    There is a class "Net::OSCAR::Screenname". OSCAR screennames are case
-    and whitespace insensitive, and if you do something like "$buddy = new
-    Net::OSCAR::Screenname "Matt Sachs"" instead of "$buddy = "Matt Sachs"",
-    this will be taken care of for you when you use the string comparison
-    operators (eq, ne, cmp, etc.)
+        There is a class "Net::OSCAR::Screenname". OSCAR screennames are
+        case and whitespace insensitive, and if you do something like
+        "$buddy = new Net::OSCAR::Screenname "Matt Sachs"" instead of
+        "$buddy = "Matt Sachs"", this will be taken care of for you when you
+        use the string comparison operators (eq, ne, cmp, etc.)
 
 HISTORY
-    *   0.08, 2001-09-07
+        *   0.09, 2001-10-01
 
-        *   Totally rewritten buddylist handling. It is now much cleaner,
-            bug-resistant, and featureful.
+            *   Crash and undefined value fixes
 
-        *   Many, many internal changes that I don't feel like enumerating.
-            Hey, there's a reason that I haven't declared the interface
-            stable yet! ;)
+            *   New method: im_ok
 
-        *   New convenience object: Net::OSCAR::Screenname
+            *   New method: rename_group, should fix "Couldn't get group
+                name" error.
 
-        *   Makefile.PL: Fixed perl version test and compatibility with BSD
-            make
+            *   Fix for buddy_in callback and data
 
-    *   0.07, 2001-08-13
+            *   Better error handling when we can't resolve a host
 
-        *   A bunch of Makefile.PL fixes
+            *   Vastly improved logging infrastructure - debug_print(f)
+                replaced with log_print(f). debug_print callback is now
+                called log and has an extra parameter.
 
-        *   Fixed spurious admin_error callback and prevent user from having
-            multiple pending requests of the same type. (closes #39)
+            *   Fixed MANIFEST - we don't actually use Changes (and we do
+                use Screenname.pm)
 
-        *   Head off some potential problems with set_visibility. (closes
-            #34)
+            *   blinternal now automagically enforces the proper structure
+                (the right things become Net::OSCAR::TLV tied hashes and the
+                name and data keys are automatically created) upon
+                vivification. So, you can do
+                $bli->{0}->{1}->{2}->{data}->{0x3} = "foo" without worrying
+                if 0, 1, 2, or data have been tied. Should close bug #47.
 
-        *   Removed connections method, added selector_filenos
+        *   0.08, 2001-09-07
 
-        *   Added error number 29 (too many recent signons from your site)
-            to Net::OSCAR::Common.
+            *   Totally rewritten buddylist handling. It is now much
+                cleaner, bug-resistant, and featureful.
 
-        *   We now explicitly perl 5.6.0 or newer.
+            *   Many, many internal changes that I don't feel like
+                enumerating. Hey, there's a reason that I haven't declared
+                the interface stable yet! ;)
 
-    *   0.06, 2001-08-12
+            *   New convenience object: Net::OSCAR::Screenname
 
-        *   Prevent sending duplicate signon_done messages
+            *   Makefile.PL: Fixed perl version test and compatibility with
+                BSD make
 
-        *   Don't addconn after crapping out!
+        *   0.07, 2001-08-13
 
-        *   Don't try to delconn unless we have connections.
+            *   A bunch of Makefile.PL fixes
 
-        *   delete returns the correct value now in Net::OSCAR::Buddylist.
+            *   Fixed spurious admin_error callback and prevent user from
+                having multiple pending requests of the same type. (closes
+                #39)
 
-        *   Don't use warnings if $] <= 5.005
+            *   Head off some potential problems with set_visibility.
+                (closes #34)
 
-        *   evil is a method, not a manpage (doc fix)
+            *   Removed connections method, added selector_filenos
 
-        *   Added buddyhash method.
+            *   Added error number 29 (too many recent signons from your
+                site) to Net::OSCAR::Common.
 
-        *   Added a debug_print callback.
+            *   We now explicitly perl 5.6.0 or newer.
 
-        *   Clarified process_connections method in documentation
+        *   0.06, 2001-08-12
 
-        *   You can now specify an alternate host/port in signon
+            *   Prevent sending duplicate signon_done messages
 
-        *   Added name method to Chat.
+            *   Don't addconn after crapping out!
 
-        *   permit list and deny list are no longer part of buddylist
+            *   Don't try to delconn unless we have connections.
 
-        *   Rewrote buddylist parsing (again!)
+            *   delete returns the correct value now in
+                Net::OSCAR::Buddylist.
 
-        *   No more default profile.
+            *   Don't use warnings if $] <= 5.005
 
-        *   Fix bug when storing into an already-existing key in
-            Net::OSCAR::Buddylist.
+            *   evil is a method, not a manpage (doc fix)
 
-        *   snacsnatcher: Remove spurious include of Net::OSCAR::Common
+            *   Added buddyhash method.
 
-        *   We don't need to handle VISMODE_PERMITBUDS ourself - the server
-            takes care of it. Thanks, VB!
+            *   Added a debug_print callback.
 
-        *   Makefile.PL: Lots of way cool enhancements to make dist:
+            *   Clarified process_connections method in documentation
 
-            -   It modifies the version number for us
+            *   You can now specify an alternate host/port in signon
 
-            -   It does a CVS rtag
+            *   Added name method to Chat.
 
-            -   It updates the HTML documentation on zevils and the README.
+            *   permit list and deny list are no longer part of buddylist
 
-        *   Added HISTORY and INSTALLATION section to POD.
+            *   Rewrote buddylist parsing (again!)
 
-    *   0.05, 2001-08-08
+            *   No more default profile.
 
-        *   Don't send signon_done until after we get buddylist.
+            *   Fix bug when storing into an already-existing key in
+                Net::OSCAR::Buddylist.
 
-        *   Added signoff method.
+            *   snacsnatcher: Remove spurious include of Net::OSCAR::Common
 
-        *   Fixed typo in documentation
+            *   We don't need to handle VISMODE_PERMITBUDS ourself - the
+                server takes care of it. Thanks, VB!
 
-        *   Fixed chat_invite parm count
+            *   Makefile.PL: Lots of way cool enhancements to make dist:
 
-        *   Added Scalar::Utils::dualvar variables, especially to Common.pm.
-            dualvar variables return different values in numeric and string
-            context.
+                -   It modifies the version number for us
 
-        *   Added url method for Net::OSCAR::Chat (closes #31)
+                -   It does a CVS rtag
 
-        *   Divide evil by 10 in extract_userinfo (closes #30)
+                -   It updates the HTML documentation on zevils and the
+                    README.
 
-        *   chat_invite now exposes chatname (closes #32)
+            *   Added HISTORY and INSTALLATION section to POD.
 
-        *   Removed unnecessary and warning-generating session length from
-            extract_userinfo
+        *   0.05, 2001-08-08
 
-    *   0.01, 2001-08-02
+            *   Don't send signon_done until after we get buddylist.
 
-        *   Initial release.
+            *   Added signoff method.
+
+            *   Fixed typo in documentation
+
+            *   Fixed chat_invite parm count
+
+            *   Added Scalar::Utils::dualvar variables, especially to
+                Common.pm. dualvar variables return different values in
+                numeric and string context.
+
+            *   Added url method for Net::OSCAR::Chat (closes #31)
+
+            *   Divide evil by 10 in extract_userinfo (closes #30)
+
+            *   chat_invite now exposes chatname (closes #32)
+
+            *   Removed unnecessary and warning-generating session length
+                from extract_userinfo
+
+        *   0.01, 2001-08-02
+
+            *   Initial release.
 
 SUPPORT
-    See http://www.zevils.com/programs/net-oscar/ for support, including a
-    mailing list and bug-tracking system.
+        See http://www.zevils.com/programs/net-oscar/ for support, including
+        a mailing list and bug-tracking system.
 
 AUTHOR
-    Matthew Sachs <matthewg@zevils.com>.
+        Matthew Sachs <matthewg@zevils.com>.
 
 CREDITS
-    John "VBScript" for a lot of technical assistance, including the
-    explanation of rates.
+        John "VBScript" for a lot of technical assistance, including the
+        explanation of rates.
 
-    Adam Fritzler and the libfaim team for their documentation and an OSCAR
-    implementation that was used to help figure out a lot of the protocol
-    details. <http://www.zigamorph.net/faim/protocol/>
+        Adam Fritzler and the libfaim team for their documentation and an
+        OSCAR implementation that was used to help figure out a lot of the
+        protocol details. <http://www.zigamorph.net/faim/protocol/>
 
-    Mark Doliner for help with remote buddylists.
-    <http://kingant.net/libfaim/ReadThis.html>
+        Mark Doliner for help with remote buddylists.
+        <http://kingant.net/libfaim/ReadThis.html>
 
-    The gaim team - the source to their libfaim client was also very
-    helpful. <http://gaim.sourceforge.net/>
+        The gaim team - the source to their libfaim client was also very
+        helpful. <http://gaim.sourceforge.net/>
 
-    The users of aimirc for being reasonably patient while this module was
-    developed. <http://www.zevils.com/programs/aimirc/>
+        The users of aimirc for being reasonably patient while this module
+        was developed. <http://www.zevils.com/programs/aimirc/>
 
-    Jayson Baker for some last-minute debugging help.
+        Jayson Baker for some last-minute debugging help.
 
-    AOL, for creating the AOL Instant Messenger service, even though they
-    aren't terribly helpful to developers of third-party clients.
+        AOL, for creating the AOL Instant Messenger service, even though
+        they aren't terribly helpful to developers of third-party clients.
 
 LEGAL
-    Copyright (c) 2001 Matthew Sachs. All rights reserved. This program is
-    free software; you can redistribute it and/or modify it under the same
-    terms as Perl itself. AOL Instant Messenger and AIM are registered
-    service marks of AOL/Time Warner. America OnLine is a registered
-    trademark of AOL/Time Warner. "Net::OSCAR" is not affiliated with,
-    endorsed by, or supported by AOL.
+        Copyright (c) 2001 Matthew Sachs. All rights reserved. This program
+        is free software; you can redistribute it and/or modify it under the
+        same terms as Perl itself. AOL Instant Messenger and AIM are
+        registered service marks of AOL/Time Warner. America OnLine is a
+        registered trademark of AOL/Time Warner. "Net::OSCAR" is not
+        affiliated with, endorsed by, or supported by AOL.
 
