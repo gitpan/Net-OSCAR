@@ -1268,7 +1268,7 @@ HIGH-PERFORMANCE EVENT PROCESSING
     For optimum performance, use the "connection_changed" callback.
 
 HISTORY
-    *   1.905, 2004-08-28
+    *   1.906, 2004-08-28
 
         *   Reorganized documentation
 

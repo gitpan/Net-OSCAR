@@ -17,8 +17,8 @@ use Net::OSCAR::TLV;
 use Net::OSCAR::XML;
 
 use vars qw($VERSION $REVISION);
-$VERSION = '1.905';
-$REVISION = '$Revision: 1.38.2.9 $';
+$VERSION = '1.906';
+$REVISION = '$Revision: 1.38.2.10 $';
 
 sub init_entry($$$$) {
 	my($blinternal, $type, $gid, $bid) = @_;

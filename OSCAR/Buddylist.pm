@@ -9,8 +9,8 @@ This is a tied hash class that has that behavior for its keys.
 
 package Net::OSCAR::Buddylist;
 
-$VERSION = '1.905';
-$REVISION = '$Revision: 1.33.2.6 $';
+$VERSION = '1.906';
+$REVISION = '$Revision: 1.33.2.7 $';
 
 use strict;
 use vars qw($VERSION);

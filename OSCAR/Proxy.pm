@@ -1,7 +1,7 @@
 package Net::OSCAR::Proxy;
 
-$VERSION = '1.905';
-$REVISION = '$Revision: 1.4.2.6 $';
+$VERSION = '1.906';
+$REVISION = '$Revision: 1.4.2.7 $';
 
 use strict;
 use vars qw($VERSION $REVISION);

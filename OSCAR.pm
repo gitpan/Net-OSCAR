@@ -1,7 +1,9 @@
 package Net::OSCAR;
 
-$VERSION = '1.905';
-$REVISION = '$Revision: 1.173.2.18 $';
+$VERSION = '1.906';
+$REVISION = '$Revision: 1.173.2.20 $';
+
+=pod
 
 =head1 NAME
 
@@ -2668,7 +2670,7 @@ For optimum performance, use the L<"connection_changed"> callback.
 
 =item *
 
-1.905, 2004-08-28
+1.906, 2004-08-28
 
 =over 4
 
