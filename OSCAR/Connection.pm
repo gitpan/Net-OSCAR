@@ -1,14 +1,10 @@
 package Net::OSCAR::Connection;
 
-$VERSION = 0.06;
+$VERSION = 0.07;
 
 use strict;
 use vars qw($VERSION);
-if($[ > 5.005) {
-	require warnings;
-} else {
-	$^W = 1;  
-}
+use warnings;
 use Carp;
 use Socket;
 use Symbol;
@@ -275,7 +271,7 @@ sub process_one($) {
 		} else {
 			$self->debug_print("Got connack.");
 		}
-		confess "Got bad connack from server" unless $self->{channel} == FLAP_CHAN_NEWCONN;
+		$self->{session}->crapout($self, "Got bad connack from server") unless $self->{channel} == FLAP_CHAN_NEWCONN;
 
 		if($self->{conntype} == CONNTYPE_LOGIN) {
 			$self->debug_print("Got connack.  Sending connack.");

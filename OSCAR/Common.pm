@@ -1,13 +1,9 @@
 package Net::OSCAR::Common;
 
-$VERSION = 0.06;
+$VERSION = 0.07;
 
 use strict;
-if($[ > 5.005) {
-	require warnings;
-} else {
-	$^W = 1;  
-}
+use warnings;
 use vars qw(@ISA @EXPORT_OK %EXPORT_TAGS $VERSION);
 use Scalar::Util qw(dualvar);
 require Exporter;
@@ -99,6 +95,7 @@ use constant RATE_DISCONNECT => dualvar(4, "disconnect");
 
 use constant ENCODING => 'text/aolrtf; charset="us-ascii"';
 
+# I'm not 100% sure about error 29
 use constant ERRORS => split(/\n/, <<EOF);
 Invalid error
 Invalid SNAC
@@ -125,6 +122,10 @@ List overflow
 Request ambiguous
 Queue full
 Not while on AOL
+Unknown error 26
+Unknown error 27
+Unknown error 28
+There have been too many recent signons from this address.  Please wait a few minutes and try again.
 EOF
 
 sub randchars($) {

@@ -1,14 +1,10 @@
 package Net::OSCAR::Callbacks;
 
-$VERSION = 0.06;
+$VERSION = 0.07;
 
 use strict;
 use vars qw($VERSION);
-if($[ > 5.005) {
-	require warnings;
-} else {
-	$^W = 1;  
-}
+use warnings;
 use Carp;
 
 use Net::OSCAR::Common qw(:all);
@@ -321,6 +317,7 @@ sub process_snac($$) {
 				($session->{visibility}) = unpack("C", $tlv->{0xCA});
 				$haspd = $tlv->{0xCB};
 
+				$session->{haspd} = $haspd;
 				if(substr($data, 0, 4) eq chr(0)x4 and $haspd and $haspd eq chr(0xFF)x4) {
 					substr($data, 0, 8) = "";
 					($tlvlen) = unpack("n", substr($data, 0, 2, ""));
@@ -492,6 +489,7 @@ sub process_snac($$) {
 		} elsif($reqtype == 0x1E) {
 			$reqdesc = ADMIN_TYPE_ACCOUNT_CONFIRM;
 		}
+		delete $session->{adminreq}->{$reqdesc} if $reqdesc;
 		$reqdesc ||= sprintf "unknown admin reply type 0x%04X/0x%04X", $reqtype, $subreq;
 
 		my $errdesc = "";

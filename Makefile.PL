@@ -1,6 +1,9 @@
 use ExtUtils::MakeMaker;
 # See lib/ExtUtils/MakeMaker.pm for details of how to influence
 # the contents of the Makefile that is written.
+
+die "This module requires perl 5.6.0 or newer - you have $]\n" unless $] >= 5.006;
+
 WriteMakefile(
     'dist'		=> { DIST_DEFAULT => 'predist tardist' },
     'NAME'		=> 'Net::OSCAR',
@@ -14,6 +17,7 @@ WriteMakefile(
 sub MY::postamble {
 	<<EOF;
 
+.PHONY: predist
 ifdef OSCARVER
 VERSION = \$(OSCARVER)
 VERSION_SYM = \$(OSCARVER)

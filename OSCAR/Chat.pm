@@ -1,14 +1,10 @@
 package Net::OSCAR::Chat;
 
 
-$VERSION = 0.06;
+$VERSION = 0.07;
 
 use strict;
-if($[ > 5.005) {
-	require warnings;
-} else {
-	$^W = 1;  
-}
+use warnings;
 use Carp;
 
 use Net::OSCAR::TLV;

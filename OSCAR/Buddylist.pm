@@ -1,14 +1,10 @@
 package Net::OSCAR::Buddylist;
 
-$VERSION = 0.06;
+$VERSION = 0.07;
 
 use strict;
 use vars qw($VERSION);
-if($[ > 5.005) {
-	require warnings;
-} else {
-	$^W = 1;  
-}
+use warnings;
 
 use Carp;
 use Net::OSCAR::Common qw(:all);
