@@ -129,7 +129,9 @@ METHODS
         screenname
         password
             Screenname and password are mandatory. The other keys are
-            optional.
+            optional. In the special case of password being present but
+            undefined, the auth_challenge callback will be used - see
+            "auth_challenge" for details.
 
         host
         port
@@ -146,6 +148,10 @@ METHODS
         Example of signing on to ICQ:
 
                 $oscar->signon(screenname => "123456", password => "password", OSCAR_SVC_ICQ);
+
+    auth_response MD5_DIGEST
+        Provide a response to an authentication challenge - see the
+        "auth_challenge" callback for details.
 
     signoff
         Sign off from the OSCAR service.
@@ -641,6 +647,32 @@ CALLBACKS
     signon_done(OSCAR)
         Called when the user is completely signed on to the service.
 
+    auth_challenge(OSCAR, CHALLENGE, HASHSTR)
+        OSCAR uses an MD5-based challenge/response system for authentication
+        so that the password is never sent in plaintext over the network.
+        When a user wishes to sign on, the OSCAR server sends an arbitrary
+        number as a challenge. The client must respond with the MD5 digest
+        of the concatenation of, in this order, the challenge, the password,
+        and an additional hashing string (currently always the string "AOL
+        Instant Messenger (SM)", but it is possible that this might change
+        in the future.)
+
+        If password is undefined in "signon", this callback will be
+        triggered when the server sends a challenge during the signon
+        process. The client must reply with the MD5 digest of CHALLENGE .
+        password . HASHSTR. For instance, using the MD5::Digest module:
+
+                my($oscar, $challenge, $hashstr) = @_;
+                my $md5 = Digest::MD5->new;
+                $md5->add($challenge);
+                $md5->add("password");
+                $md5->add($hashstr);
+                $oscar->auth_response($md5->digest);
+
+        Note that this functionality is only available for certain services.
+        It is available for AIM but not ICQ. Note also that the MD5 digest
+        must be in binary form, not the more common hex or base64 forms.
+
     log(OSCAR, LEVEL, MESSAGE)
         Use this callback if you don't want the log_print methods to just
         print to STDERR. It is called when even "MESSAGE" of level "LEVEL"
@@ -801,6 +833,14 @@ MISCELLANEOUS
         method of "Net::OSCAR::Connection", not "Net::OSCAR".
 
 HISTORY
+    *   0.58, 2002-01-20
+
+        *   Send buddylist deletions before adds - needed for complex BL
+            mods (loadbuddies)
+
+        *   Added hooks to allow client do MD5 digestion for authentication
+            (auth_challenge callback, Net::OSCAR::auth_response method)
+
     *   0.57, 2002-01-16
 
         *   Send callback_chat_joined correctly when joining an existing
