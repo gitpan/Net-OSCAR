@@ -1,6 +1,6 @@
 package Net::OSCAR::Common;
 
-$VERSION = '0.61';
+$VERSION = '0.62';
 
 use strict;
 use vars qw(@ISA @EXPORT_OK %EXPORT_TAGS $VERSION);
@@ -176,6 +176,7 @@ List overflow
 Request ambiguous
 Queue full
 Not while on AOL
+Unknown error 25
 Unknown error 26
 Unknown error 27
 Unknown error 28

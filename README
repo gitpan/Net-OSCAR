@@ -864,6 +864,14 @@ MISCELLANEOUS
         "Net::OSCAR::Connection".
 
 HISTORY
+    *   0.62, 2002-02-25
+
+        *   Error handling slightly improved; error 29 is no longer unknown.
+
+        *   A minor internal buddylist enhancement
+
+        *   snacsnatcher fixes
+
     *   0.61, 2002-02-17
 
         *   Fixed connection handling
