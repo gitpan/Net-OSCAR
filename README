@@ -864,9 +864,13 @@ MISCELLANEOUS
         "Net::OSCAR::Connection".
 
 HISTORY
+    *   0.61, 2002-02-17
+
+        *   Fixed connection handling
+
     *   0.60, 2002-02-17
 
-        *   Various connectino_changed fixes, including the new readwrite
+        *   Various connection_changed fixes, including the new readwrite
             status.
 
         *   Added Net::OSCAR::Connection::session method
