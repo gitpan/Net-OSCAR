@@ -720,9 +720,9 @@ CHATS
 
 ICQ
     ICQ support is very preliminary. A patch enabling us to sign on to ICQ
-    was provided by SDiZ Cheng. No further work beyond the ability to sign
-    on has been done on ICQ at this time. See the "signon" method for
-    details on signing on via ICQ.
+    was provided by Sam Wong. No further work beyond the ability to sign on
+    has been done on ICQ at this time. See the "signon" method for details
+    on signing on via ICQ.
 
 CONSTANTS
     The following constants are defined when "Net::OSCAR" is imported with
@@ -801,9 +801,20 @@ MISCELLANEOUS
         method of "Net::OSCAR::Connection", not "Net::OSCAR".
 
 HISTORY
+    *   0.56, 2002-01-16
+
+        *   Fixed rate handling
+
+        *   Send multiple buddylist modifications per SNAC
+
+        *   Detect when someone else signs on with your screenname
+
+        *   Corrected attribution of ICQ support
+
     *   0.55, 2001-12-29
 
-        *   Preliminary ICQ support, courtesy of SDiZ Chen.
+        *   Preliminary ICQ support, courtesy of SDiZ Chen (actually, Sam
+            Wong).
 
         *   Restored support for pre-5.6 perls - reverted from "IO::Socket"
             to "Socket".
@@ -1015,7 +1026,7 @@ CREDITS
     Mark Doliner for help with remote buddylists.
     <http://kingant.net/libfaim/ReadThis.html>
 
-    SDiZ Cheng <sdiz@uhome.net> for a patch implementing ICQ2000 support.
+    Sam Wong <sam@uhome.net> for a patch implementing ICQ2000 support.
 
     The gaim team - the source to their libfaim client was also very
     helpful. <http://gaim.sourceforge.net/>
@@ -1036,6 +1047,7 @@ LEGAL
     free software; you can redistribute it and/or modify it under the same
     terms as Perl itself. AOL and AMERICA ONLINE are registered trademarks
     owned by America Online, Inc. The INSTANT MESSENGER mark is owned by
-    America Online, Inc. "Net::OSCAR" is not endorsed by, or affiliated
-    with, America Online, Inc.
+    America Online, Inc. ICQ is a trademark and/or servicemark of ICQ.
+    "Net::OSCAR" is not endorsed by, or affiliated with, America Online, Inc
+    or ICQ.
 

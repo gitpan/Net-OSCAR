@@ -1,6 +1,6 @@
 package Net::OSCAR::Callbacks;
 
-$VERSION = 0.55;
+$VERSION = 0.56;
 
 use strict;
 use vars qw($VERSION);
@@ -164,7 +164,7 @@ sub process_snac($$) {
 
 		$session->callback_buddy_in($screenname, $group, $session->{buddies}->{$group}->{members}->{$screenname});
 	} elsif($family == 0x3 and $subtype == 0xC) {
-		my ($buddy) = unpack("C/a*", $data);
+		my ($buddy) = new Net::OSCAR::Screenname(unpack("C/a*", $data));
 		my $group = $session->findbuddy($buddy);
 		$session->{buddies}->{$group}->{members}->{$buddy}->{online} = 0;
 		$connection->log_print(OSCAR_DBG_DEBUG, "And so, another former ally has abandoned us.  Curse you, $buddy!");
@@ -230,22 +230,23 @@ sub process_snac($$) {
 
 		my($group, $window, $clear, $alert, $limit, $disconnect, $current, $max) = unpack("xx n N*", $data);
 		my($rate, $worrisome);
-		if($current >= $clear) {
-			$rate = RATE_CLEAR;
-			$worrisome = 0;
-		} elsif($current >= $alert) {
+
+		if($current <= $disconnect) {
+			$rate = RATE_DISCONNECT;
+			$worrisome = 1;
+		} elsif($current <= $limit) {
+			$rate = RATE_LIMIT;
+			$worrisome = 1;
+		} elsif($current <= $alert) {
 			$rate = RATE_ALERT;
-			if($current - $limit < 250) {
+			if($current - $limit < 500) {
 				$worrisome = 1;
 			} else {
 				$worrisome = 0;
 			}
-		} elsif($current >= $limit) {
-			$rate = RATE_LIMIT;
-			$worrisome = 1;
-		} else {
-			$rate = RATE_DISCONNECT;
-			$worrisome = 1;
+		} else { # We're clear
+			$rate = RATE_CLEAR;
+			$worrisome = 0;
 		}
 
 		$session->callback_rate_alert($rate, $clear, $window, $worrisome);
@@ -290,27 +291,32 @@ sub process_snac($$) {
 	} elsif($family == 0x13 and $subtype == 0x0E) {
 		$session->{budmods}--;
 		$connection->log_print(OSCAR_DBG_DEBUG, "Got blmod ack ($session->{budmods} left).");
-		my($error) = unpack("n", $data);
-		if($error != 0) {
-			$session->{buderrors} = 1;
-			my($type, $gid, $bid) = ($reqdata->{type}, $reqdata->{gid}, $reqdata->{bid});
-			if(exists($session->{blold}->{$type}) and exists($session->{blold}->{$type}->{$gid}) and exists($session->{blold}->{$type}->{$gid}->{$bid})) {
-				$session->{blinternal}->{$type}->{$gid}->{$bid} = $session->{blold}->{$type}->{$gid}->{$bid};
-			} else {
-				delete $session->{blinternal}->{$type} unless exists($session->{blold}->{$type});
-				delete $session->{blinternal}->{$type}->{$gid} unless exists($session->{blold}->{$type}) and exists($session->{blold}->{$type}->{$gid});
-				delete $session->{blinternal}->{$type}->{$gid}->{$bid} unless exists($session->{blold}->{$type}) and exists($session->{blold}->{$type}->{$gid}) and exists($session->{blold}->{$type}->{$gid}->{$bid});
+		my(@errors) = unpack("n*", $data);
+
+		# If this is the last packet and there are/were no problems, send bl_ok
+		$session->callback_buddylist_ok() unless $session->{budmods} > 0 or $session->{buderrors} or grep { $_ } @errors;
+
+		my @reqdata = @$reqdata;
+		foreach my $error(@errors) {
+			my($errdata) = shift @reqdata;
+			if($error != 0) {
+				$session->{buderrors} = 1;
+				my($type, $gid, $bid) = ($errdata->{type}, $errdata->{gid}, $errdata->{bid});
+				if(exists($session->{blold}->{$type}) and exists($session->{blold}->{$type}->{$gid}) and exists($session->{blold}->{$type}->{$gid}->{$bid})) {
+					$session->{blinternal}->{$type}->{$gid}->{$bid} = $session->{blold}->{$type}->{$gid}->{$bid};
+				} else {
+					delete $session->{blinternal}->{$type} unless exists($session->{blold}->{$type});
+					delete $session->{blinternal}->{$type}->{$gid} unless exists($session->{blold}->{$type}) and exists($session->{blold}->{$type}->{$gid});
+					delete $session->{blinternal}->{$type}->{$gid}->{$bid} unless exists($session->{blold}->{$type}) and exists($session->{blold}->{$type}->{$gid}) and exists($session->{blold}->{$type}->{$gid}->{$bid});
+				}
+				$session->callback_buddylist_error($error, $errdata->{desc});
 			}
-			$session->callback_buddylist_error($error, $reqdata->{desc});
-		} else {
-			$session->callback_buddylist_ok() unless $session->{budmods} > 0;
 		}
+
 		if($session->{budmods} == 0) {
 			Net::OSCAR::_BLInternal::BLI_to_NO($session) if $session->{buderrors};
 			delete $session->{qw(blold buderrors)};
 		}
-
-		$connection->flap_put(shift @{$session->{snacqueue}});
 	} elsif($family == 0x13 and $subtype == 0x0F) {
 		if($session->{gotbl}) {
 			delete $session->{gotbl};
@@ -463,6 +469,8 @@ sub process_snac($$) {
 	} elsif($family == 0x07 and $subtype == 0x05) {
 		$session->log_print(OSCAR_DBG_DEBUG, "Account confirmed.");
 		$session->callback_admin_ok(ADMIN_TYPE_ACCOUNT_CONFIRM);
+	} elsif($family == 0x09 and $subtype == 0x02) {
+		$session->crapout($connection, "A session using this screenname has been opened in another location.");
 	} else {
 		$connection->log_print(OSCAR_DBG_NOTICE, "Unknown SNAC: ".hexdump($snac->{data}));
 	}
