@@ -116,9 +116,36 @@ METHODS
         Gets or sets the timeout value used by the do_one_loop method. The
         default timeout is 0.01 seconds.
 
+    signon (HASH)
     signon (SCREENNAME, PASSWORD[, HOST, PORT])
-        Sign on to the OSCAR service. You can specify an alternate host/port
-        to connect to. The default is login.oscar.aol.com port 5190.
+        Sign on to the OSCAR service. Using a hash to pass the parameters to
+        this function is preferred - the old method is deprecated. You can
+        specify an alternate host/port to connect to. The default is
+        login.oscar.aol.com port 5190.
+
+        If you use a hash to pass parameters to this function, here are the
+        valid keys:
+
+        screenname
+        password
+            Screenname and password are mandatory. The other keys are
+            optional.
+
+        host
+        port
+
+        There are some other data that can be passed to this method. These
+        data are used to sign on to an OSCAR-using service other than the
+        default of AOL Instant Messenger, such as ICQ. You should not
+        attempt to specify these data directly - instead, use one of the
+        following constants:
+
+        OSCAR_SVC_AIM
+        OSCAR_SVC_ICQ
+
+        Example of signing on to ICQ:
+
+                $oscar->signon(screenname => "123456", password => "password", OSCAR_SVC_ICQ);
 
     signoff
         Sign off from the OSCAR service.
@@ -301,6 +328,10 @@ METHODS
         handle sending away messages to people who contact you when you are
         away - you must perform this yourself if you want it done.
 
+        Returns a "request ID" that you can use in the "im_ok" callback to
+        identify the message. If the message was too long to send, returns
+        zero.
+
     buddyhash
         Returns a reference to a tied hash which automatically normalizes
         its keys upon a fetch. Use this for hashes whose keys are AIM
@@ -458,6 +489,10 @@ METHODS
         Returns the user's current screenname, including all capitalization
         and spacing.
 
+    is_on
+        Returns true if the user is signed on to the OSCAR service.
+        Otherwise, returns false.
+
     set_buddy_comment(GROUP, BUDDY[, COMMENT])
         Set a brief comment about a buddy. This can be used for things such
         as the buddy's real name. You must call "commit_buddylist" to save
@@ -498,7 +533,7 @@ CALLBACKS
         If "FATAL" is non-zero, the error was fatal and the connection to
         OSCAR has been closed.
 
-    rate_alert (OSCAR, LEVEL, CLEAR, WINDOW)
+    rate_alert (OSCAR, LEVEL, CLEAR, WINDOW, WORRISOME)
         This is called when you are sending commands to OSCAR too quickly.
 
         LEVEL is one of RATE_CLEAR, RATE_ALERT, RATE_LIMIT, or
@@ -514,6 +549,11 @@ CALLBACKS
         commands in CLEAR milliseconds. If you just want to keep it simple,
         you can just not send any commands for CLEAR milliseconds and you'll
         be fine.
+
+        WORRISOME is nonzero if "Net::OSCAR" thinks that the alert is
+        anything worth worrying about. Otherwise it is zero. This is very
+        rough, but it's a good way for the lazy to determine whether or not
+        to bother passing the alert on to their users.
 
     buddylist_error (OSCAR, ERROR, WHAT)
         This is called when there is an error commiting changes to the
@@ -559,8 +599,9 @@ CALLBACKS
     chat_buddy_out (OSCAR, SCREENNAME, CHAT)
         Called when someone leaves a chatroom.
 
-    im_ok (OSCAR, TO)
-        Called when an IM to "TO" is successfully sent.
+    im_ok (OSCAR, TO, REQID)
+        Called when an IM to "TO" is successfully sent. REQID is the request
+        ID of the IM as returned by "send_im".
 
     im_in (OSCAR, FROM, MESSAGE[, AWAY])
         Called when someone sends you an instant message. If the AWAY
@@ -677,6 +718,12 @@ CHATS
         Returns the exchange of the chatroom. This is normally 4 but can be
         5 for certain chatrooms.
 
+ICQ
+    ICQ support is very preliminary. A patch enabling us to sign on to ICQ
+    was provided by SDiZ Cheng. No further work beyond the ability to sign
+    on has been done on ICQ at this time. See the "signon" method for
+    details on signing on via ICQ.
+
 CONSTANTS
     The following constants are defined when "Net::OSCAR" is imported with
     the ":standard" tag. Unless indicated otherwise, the constants are
@@ -754,6 +801,23 @@ MISCELLANEOUS
         method of "Net::OSCAR::Connection", not "Net::OSCAR".
 
 HISTORY
+    *   0.55, 2001-12-29
+
+        *   Preliminary ICQ support, courtesy of SDiZ Chen.
+
+        *   Restored support for pre-5.6 perls - reverted from "IO::Socket"
+            to "Socket".
+
+        *   Corrected removal of buddylist entries and other
+            buddylist-handling improvements
+
+        *   Improved rate handling - new "worrisome" parameter to rate_alert
+            callback
+
+        *   Removed remaining "croak" from "OSCAR::Connection"
+
+        *   Added is_on method
+
     *   0.50, 2001-12-23
 
         *   Fixes for the "crap out on 'connection reset by peer'" and "get
@@ -950,6 +1014,8 @@ CREDITS
 
     Mark Doliner for help with remote buddylists.
     <http://kingant.net/libfaim/ReadThis.html>
+
+    SDiZ Cheng <sdiz@uhome.net> for a patch implementing ICQ2000 support.
 
     The gaim team - the source to their libfaim client was also very
     helpful. <http://gaim.sourceforge.net/>

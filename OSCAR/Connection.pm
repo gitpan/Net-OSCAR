@@ -1,13 +1,15 @@
 package Net::OSCAR::Connection;
 
-$VERSION = 0.50;
+$VERSION = 0.55;
 
 use strict;
 use vars qw($VERSION);
 use Carp;
+use Socket;
+use Symbol;
 use Digest::MD5;
+use Fcntl;
 use POSIX qw(:errno_h);
-use IO::Socket;
 
 use Net::OSCAR::Common qw(:all);
 use Net::OSCAR::TLV;
@@ -24,6 +26,7 @@ sub new($$$$$$) { # Think you got enough parameters there, Chester?
 	$self->{auth} = shift;
 	$self->{conntype} = shift;
 	$self->{description} = shift;
+	$self->{paused} = 0;
 	$self->connect(shift);
 
 	return $self;
@@ -49,7 +52,7 @@ sub flap_encode($$;$) {
 sub flap_put($$;$) {
 	my($self, $msg, $channel) = @_;
 
-	return unless $self->{socket} and $self->{socket}->opened and $self->{socket}->connected and !$self->{socket}->error;
+	return unless $self->{socket} and CORE::fileno($self->{socket}) and getpeername($self->{socket}); # and !$self->{socket}->error;
 
 	my $emsg = $self->flap_encode($msg, $channel);
 	syswrite($self->{socket}, $emsg, length($emsg)) or return $self->{session}->crapout($self, "Couldn't write to socket: $!");
@@ -159,23 +162,27 @@ sub snac_dump($$) {
 	return "family=".$snac->{family}." subtype=".$snac->{subtype};
 }
 
-sub encode_password($$$) {
-	my($self, $password, $key) = @_;
-	my $md5 = Digest::MD5->new;
-
-	$md5->add($key);
-	$md5->add($password);
-	$md5->add("AOL Instant Messenger (SM)");
-	return $md5->digest();
-}
-
 sub disconnect($) {
 	my($self) = @_;
 
 	$self->{session}->delconn($self);
 }
 
-sub set_blocking($$) { shift->{socket}->blocking(shift); }
+sub set_blocking($$) {
+	my $self = shift;
+	my $blocking = shift;
+	my $flags = 0;
+
+	fcntl($self->{socket}, F_GETFL, $flags);
+	if($blocking) {
+		$flags &= ~O_NONBLOCK;
+	} else {
+		$flags |= O_NONBLOCK;
+	}
+	fcntl($self->{socket}, F_SETFL, $flags);
+
+	return $self->{socket};
+}
 
 sub connect($$) {
 	my($self, $host) = @_;
@@ -185,13 +192,13 @@ sub connect($$) {
 
 	tie %tlv, "Net::OSCAR::TLV";
 
-	croak "Empty host!" unless $host;
+	return $self->{session}->crapout($self, "Empty host!") unless $host;
 	$host =~ s/:(.+)//;
 	if(!$1) {
 		if(exists($self->{session})) {
 			$port = $self->{session}->{port};
 		} else {
-			croak "No port!";
+			return $self->{session}->crapout($self, "No port!");
 		}
 	} else {
 		$port = $1;
@@ -203,17 +210,17 @@ sub connect($$) {
 	$self->{port} = $port;
 
 	$self->log_print(OSCAR_DBG_NOTICE, "Connecting to $host:$port.");
-	$self->{socket} = IO::Socket::INET->new;
-	$self->{socket}->configure; # Needed in order to be able to set blocking
+	$self->{socket} = gensym;
+	socket($self->{socket}, PF_INET, SOCK_STREAM, getprotobyname('tcp'));
 
 	$self->{ready} = 0;
 	$self->{connected} = 0;
 
 	$self->set_blocking(0);
-	
-	if(!$self->{socket}->configure({PeerAddr => $host, PeerPort => $port})) {
+	my $addr = inet_aton($host) or return $self->{session}->crapout($self, "Couldn't resolve $host.");
+	if(!connect($self->{socket}, sockaddr_in($port, $addr))) {
 		return 1 if $! == EINPROGRESS;
-		croak "Couldn't connect to $host:$port: $@";
+		return $self->{session}->crapout($self, "Couldn't connect to $host:$port: $!");
 	}
 
 	return 1;
@@ -247,16 +254,21 @@ sub process_one($) {
 
 		if($self->{conntype} == CONNTYPE_LOGIN) {
 			$self->log_print(OSCAR_DBG_DEBUG, "Got connack.  Sending connack.");
-			$self->flap_put(pack("N", 1), FLAP_CHAN_NEWCONN);
+			$self->flap_put(pack("N", 1), FLAP_CHAN_NEWCONN) unless $self->{session}->{svcdata}->{hashlogin};
 			$self->log_print(OSCAR_DBG_SIGNON, "Connected to login server.");
 			$self->{ready} = 1;
 
 			$self->log_print(OSCAR_DBG_SIGNON, "Sending screenname.");
-			%tlv = (
-				0x17 => pack("C6", 0, 0, 0, 0, 0, 0),
-				0x01 => $self->{session}->{screenname}
-			);
-			$self->flap_put(tlv_encode(\%tlv));
+			if(!$self->{session}->{svcdata}->{hashlogin}) {
+				%tlv = (
+					0x17 => pack("C6", 0, 0, 0, 0, 0, 0),
+					0x01 => $self->{session}->{screenname}
+				);
+				$self->flap_put(tlv_encode(\%tlv));
+			} else {
+				%tlv = signon_tlv($self->{session}, $self->{auth});
+				$self->flap_put(pack("N", 1) . tlv_encode(\%tlv), FLAP_CHAN_NEWCONN);
+			}
 		} else {
 			$self->log_print(OSCAR_DBG_NOTICE, "Sending BOS-Signon.");
 			#%tlv = (0x06 =>$self->{auth});
@@ -270,8 +282,24 @@ sub process_one($) {
 		$self->log_print(OSCAR_DBG_DEBUG, "SNAC time.");
 		return $self->{ready} = 1;
 	} else {
-		$snac = $self->snac_get() or return 0;
-		return Net::OSCAR::Callbacks::process_snac($self, $snac);
+		if(!$self->{session}->{svcdata}->{hashlogin}) {
+			$snac = $self->snac_get() or return 0;
+			return Net::OSCAR::Callbacks::process_snac($self, $snac);
+		} else {
+			my $data = $self->flap_get() or return 0;
+			$snac = {data => $data, reqid => 0, family => 0x17, subtype => 0x3};
+			if($self->{channel} == FLAP_CHAN_CLOSE) {
+				$self->{conntype} = CONNTYPE_LOGIN;
+				$self->{family} = 0x17;
+				$self->{subtype} = 0x3;
+				$self->{data} = $data;
+				$self->{reqid} = 0;
+				$self->{reqdata}->[0x17]->{pack("N", 0)} = "";
+				return Net::OSCAR::Callbacks::process_snac($self, $snac);
+			} else {
+				return Net::OSCAR::Callbacks::process_snac($self, $self->snac_decode($data));
+			}
+		}
 	}
 }
 

@@ -1,6 +1,6 @@
 package Net::OSCAR;
 
-$VERSION = 0.50;
+$VERSION = 0.55;
 
 =head1 NAME
 
@@ -179,22 +179,84 @@ sub timeout($;$) {
 
 =pod
 
+=item signon (HASH) 
+
 =item signon (SCREENNAME, PASSWORD[, HOST, PORT])
 
-Sign on to the OSCAR service.
-You can specify an alternate host/port to connect to.
-The default is login.oscar.aol.com port 5190.
+Sign on to the OSCAR service.  Using a hash to
+pass the parameters to this function is preferred -
+the old method is deprecated.  You can specify an
+alternate host/port to connect to.  The default is
+login.oscar.aol.com port 5190.
+
+If you use a hash to pass parameters to this function,
+here are the valid keys:
+
+=over 4
+
+=item screenname
+
+=item password
+
+Screenname and password are mandatory.  The other keys are optional.
+
+=item host
+
+=item port
+
+=back
+
+There are some other data that can be passed to this method.
+These data are used to sign on to an OSCAR-using service other than the default of
+AOL Instant Messenger, such as ICQ.  You should not attempt to specify
+these data directly - instead, use one of the following constants:
+
+=over 4
+
+=item OSCAR_SVC_AIM
+
+=item OSCAR_SVC_ICQ
+
+=back
+
+Example of signing on to ICQ:
+
+	$oscar->signon(screenname => "123456", password => "password", OSCAR_SVC_ICQ);
 
 =cut
 
-sub signon($$$;$$) {
-	my($self, $screenname, $password, $host, $port) = @_;
-	$self->{screenname} = new Net::OSCAR::Screenname $screenname;
+sub signon($@) {
+	my($self, $password, $host, %args);
+	$self = shift;
+
+	# Determine whether caller is using hash-method or old method of passing parms.
+	# Note that this breaks if caller passes in both a host and a port using the old way.
+	# But hey, that's why it's deprecated!
+	if(@_ < 3) {
+		$args{screenname} = shift @_ or return $self->crapout($self->{bos}, "You must specify a username to sign on with!");
+		$args{password} = shift @_ or return $self->crapout($self->{bos}, "You must specify a password to sign on with!");;
+		$args{host} = shift @_ if @_;
+		$args{port} = shift @_ if @_;
+	} else {
+		%args = @_;
+		return $self->crapout($self->{bos}, "You must specify a username and password to sign on with!") unless $args{screenname} and $args{password};
+	}
+
+	my %defaults = OSCAR_SVC_AIM;
+	foreach my $key(keys %defaults) {
+		$args{$key} ||= $defaults{$key};
+	}
+	$self->{screenname} = new Net::OSCAR::Screenname $args{screenname};
 
 	# We set BOS to the login connection so that our error handlers pick up errors on this connection as fatal.
-	$host ||= "login.oscar.aol.com";
-	$port ||= 5190;
-	$self->{port} = $port;
+	$args{host} ||= "login.oscar.aol.com";
+	$args{port} ||= 5190;
+
+
+	($self->{screenname}, $password, $host, $self->{port}) =
+		delete @args{qw(screenname password host port)};
+
+	$self->{svcdata} = \%args;
 	$self->{bos} = $self->addconn($password, CONNTYPE_LOGIN, "login", $host);
 	push @{$self->{connections}}, $self->{bos};
 }
@@ -447,9 +509,11 @@ sub findbuddy_byid($$$) {
 sub newid($;$) {
 	my($self, $group) = @_;
 	my $id = 0;
+	my %ids = ();
 
 	if($group) {
-		do { ++$id; } while(grep { $_->{buddyid} == $id } values %$group);
+		%ids = map { $_->{buddyid} => 1 } values %$group;
+		do { ++$id; } while($ids{$id});
 	} else {
 		do { $id = ++$self->{nextid}->{__GROUPID__}; } while($self->findgroup($id));
 	}
@@ -852,15 +916,22 @@ perhaps, because you have an away message set, give the AWAY parameter a non-zer
 value.  Note that C<Net::OSCAR> will not handle sending away messages to people who
 contact you when you are away - you must perform this yourself if you want it done.
 
+Returns a "request ID" that you can use in the C<im_ok> callback to identify the message.
+If the message was too long to send, returns zero.
+
 =cut
 
 sub send_im($$$;$) {
 	my($self, $to, $msg, $away) = @_;
 	return must_be_on($self) unless $self->{is_on};
 	my $packet = "";
-	my $reqid = 0;
+	my $reqid = (8<<16) | (unpack("n", randchars(2)))[0];
 
-	return 0 if length($msg) >= 7987;
+	if(!$self->{svcdata}->{hashlogin}) {
+		return 0 if length($msg) >= 7987;
+	} else {
+		return 0 if length($msg) > 2000;
+	}
 
 	$packet = randchars(8);
 	$packet .= pack("n", 1); # channel
@@ -874,8 +945,8 @@ sub send_im($$$;$) {
 		$packet .= tlv(3 => ""); #request server confirmation
 	}
 
-	$self->{bos}->snac_put(reqdata => $to, family => 0x4, subtype => 0x6, data => $packet);
-	return 1;
+	$self->{bos}->snac_put(reqid => $reqid, reqdata => $to, family => 0x4, subtype => 0x6, data => $packet);
+	return $reqid;
 }
 
 =pod
@@ -1402,6 +1473,11 @@ Returns the email address currently assigned to the user's account.
 
 Returns the user's current screenname, including all capitalization and spacing.
 
+=item is_on
+
+Returns true if the user is signed on to the OSCAR service.  Otherwise,
+returns false.
+
 =cut
 
 sub visibility($) { return shift->{visibility}; }
@@ -1420,6 +1496,7 @@ sub buddy($$;$) {
 }
 sub email($) { return shift->{email}; }
 sub screenname($) { return shift->{screenname}; }
+sub is_on($) { return shift->{is_on}; }
 
 =pod
 
@@ -1501,7 +1578,7 @@ C<DESCRIPTION> is a nicely formatted description of the error.  C<ERROR> is an e
 If C<FATAL> is non-zero, the error was fatal and the connection to OSCAR has been
 closed.
 
-=item rate_alert (OSCAR, LEVEL, CLEAR, WINDOW)
+=item rate_alert (OSCAR, LEVEL, CLEAR, WINDOW, WORRISOME)
 
 This is called when you are sending commands to OSCAR too quickly.
 
@@ -1514,6 +1591,11 @@ about to be disconnected.
 CLEAR and WINDOW tell you the maximum speed you can send in order to maintain RATE_CLEAR standing.
 You must send no more than WINDOW commands in CLEAR milliseconds.  If you just want to keep it
 simple, you can just not send any commands for CLEAR milliseconds and you'll be fine.
+
+WORRISOME is nonzero if C<Net::OSCAR> thinks that the alert is anything worth
+worrying about.  Otherwise it is zero.  This is very rough, but it's a good way
+for the lazy to determine whether or not to bother passing the alert on to
+their users.
 
 =item buddylist_error (OSCAR, ERROR, WHAT)
 
@@ -1563,9 +1645,10 @@ Called when a buddy has signed off (or added us to their deny list.)
 
 Called when someone leaves a chatroom.
 
-=item im_ok (OSCAR, TO)
+=item im_ok (OSCAR, TO, REQID)
 
 Called when an IM to C<TO> is successfully sent.
+REQID is the request ID of the IM as returned by C<send_im>.
 
 =item im_in (OSCAR, FROM, MESSAGE[, AWAY])
 
@@ -1763,6 +1846,13 @@ This is normally 4 but can be 5 for certain chatrooms.
 
 =back
 
+=head1 ICQ
+
+ICQ support is very preliminary.  A patch enabling us to sign on to
+ICQ was provided by SDiZ Cheng.  No further work beyond the ability
+to sign on has been done on ICQ at this time.  See the C<signon> method
+for details on signing on via ICQ.
+
 =head1 CONSTANTS
 
 The following constants are defined when C<Net::OSCAR> is imported with the
@@ -1899,6 +1989,38 @@ of C<Net::OSCAR::Connection>, not C<Net::OSCAR>.
 =head1 HISTORY
 
 =over 4
+
+=item *
+
+0.55, 2001-12-29
+
+=over 4
+
+=item *
+
+Preliminary ICQ support, courtesy of SDiZ Chen.
+
+=item *
+
+Restored support for pre-5.6 perls - reverted from C<IO::Socket> to C<Socket>.
+
+=item *
+
+Corrected removal of buddylist entries and other buddylist-handling improvements
+
+=item *
+
+Improved rate handling - new C<worrisome> parameter to rate_alert callback
+
+=item *
+
+Removed remaining C<croak> from C<OSCAR::Connection>
+
+=item *
+
+Added is_on method
+
+=back
 
 =item *
 
@@ -2268,6 +2390,8 @@ Adam Fritzler and the libfaim team for their documentation and an OSCAR implemen
 was used to help figure out a lot of the protocol details.  E<lt>http://www.zigamorph.net/faim/protocol/E<gt>
 
 Mark Doliner for help with remote buddylists.  E<lt>http://kingant.net/libfaim/ReadThis.htmlE<gt>
+
+SDiZ Cheng E<lt>sdiz@uhome.netE<gt> for a patch implementing ICQ2000 support.
 
 The gaim team - the source to their libfaim client was also very helpful.  E<lt>http://gaim.sourceforge.net/E<gt>
 
