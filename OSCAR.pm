@@ -1,6 +1,6 @@
 package Net::OSCAR;
 
-$VERSION = 0.09;
+$VERSION = 0.25;
 
 =head1 NAME
 
@@ -9,6 +9,7 @@ Net::OSCAR - Implementation of AOL's OSCAR protocol for instant messaging
 =head1 SYNOPSIS
 
 	use Net::OSCAR qw(:standard);
+	use Net::OSCAR::OldPerl; # You may need to use this perls older than 5.6.
 
 	$oscar = Net::OSCAR->new();
 	$oscar->set_callback_foo(\&foo);
@@ -69,13 +70,13 @@ connections that do belong to the object will be removed from the C<select> list
 so that you can use the lists for your own purposes.  Here is an example that
 demonstrates how to use this method with multiple C<Net::OSCAR> objects:
 
-	my $rin = $my_readers;
-	my $win = $my_writers;
+	my($rin, $win) = (0, 0);
 	foreach my $oscar(@oscars) {
-		my($readers, $writers) = $oscar->selector_filenos();
-		$rin |= $readers;
-		$win |= $writers;
+		my($thisrin, $thiswin) = $oscar->selector_filenos;
+		$rin |= $thisrin;
+		$win |= $thiswin;
 	}
+	# Add in any other file descriptors you care about using vec().
 	my $ein = $rin | $win;
 	select($rin, $win, $ein, 0.01);
 	foreach my $oscar(@oscars) {
@@ -119,7 +120,6 @@ everyone on our buddylist.
 
 =cut
 
-sub BEGIN { require 5.006; }
 use strict;
 use vars qw($VERSION @ISA @EXPORT_OK %EXPORT_TAGS);
 use Carp;
@@ -132,8 +132,8 @@ use Net::OSCAR::Buddylist;
 use Net::OSCAR::Screenname;
 use Net::OSCAR::Chat;
 use Net::OSCAR::_BLInternal;
+use Net::OSCAR::OldPerl;
 
-use warnings;
 require Exporter;
 @ISA = qw(Exporter);
 @EXPORT_OK = @Net::OSCAR::Common::EXPORT_OK;
@@ -212,7 +212,9 @@ sub signoff($) {
 	foreach my $connection(@{$self->{connections}}) {
 		$self->delconn($connection);
 	}
+	my $screenname = $self->{screenname};
 	%$self = ();
+	$self->{screename} = $screenname; # Useful for post-mortem processing in multiconnection apps
 }
 
 =pod
@@ -250,6 +252,7 @@ sub addconn($$$$$) {
 	}
 	push @{$self->{connections}}, $connection;
 	#print STDERR "After adding connection: ", Data::Dumper::Dumper($self->{connections}), "\n";
+	$self->callback_connection_changed($connection, "write");
 	return $connection;
 }
 
@@ -264,11 +267,14 @@ sub delconn($$) {
 		splice @{$self->{connections}}, $i, 1;
 		if(!$connection->{sockerr}) {
 			eval {
+				$connection->flap_put("", FLAP_CHAN_CLOSE) if $connection->{socket};
 				close $connection->{socket} if $connection->{socket};
 			};
 		} else {
 			if($connection->{conntype} == CONNTYPE_BOS) {
-				$self->crapout($connection, "Lost connection to BOS");
+				$self->callback_connection_changed($connection, "deleted");
+				delete $connection->{socket};
+				return $self->crapout($connection, "Lost connection to BOS");
 			} elsif($connection->{conntype} == CONNTYPE_CHATNAV) {
 				delete $self->{chatnav};
 			} elsif($connection->{conntype} == CONNTYPE_ADMIN) {
@@ -278,10 +284,27 @@ sub delconn($$) {
 				$self->callback_chat_closed($connection, "Lost connection to chat");
 			}
 		}
+		$self->callback_connection_changed($connection, "deleted");
 		delete $connection->{socket};
 		return 1;
 	}
 	return 0;
+}
+
+=pod
+
+=item findconn FILENO
+
+Finds the connection that is using the specified file number, or undef
+if the connection could not be found.  Returns a C<Net::OSCAR::Connection>
+object.
+
+=cut
+
+sub findconn($$) {
+	my($self, $target) = @_;
+	my($conn) = grep { fileno($_->{socket}) == $target } @{$self->{connections}};
+	return $conn;
 }
 
 sub DESTROY {
@@ -311,12 +334,8 @@ convenient for use with multiple C<Net::OSCAR> objects or
 use with a C<select>-based event loop that you are also
 using for other purposes.
 
-You must include the file numbers of all sockets returned by
-the L<connections> method in both the readers, writers, and
-errors parameters of your select statement.
-
-See the L<connections> method for a way to get the file
-descriptors to add to your C<select>.
+See the L<selector_filenos> method for a way to get the necessary
+bit vectors to use in your C<select>.
 
 =cut
 
@@ -489,16 +508,22 @@ Returns a list of all members of the deny list.
 
 =cut
 
-sub commit_buddylist($) { Net::OSCAR::_BLInternal::NO_to_BLI(shift); }
+sub commit_buddylist($) {
+	my($self) = shift;
+	return must_be_on($self) unless $self->{is_on};
+	Net::OSCAR::_BLInternal::NO_to_BLI($self);
+}
 
 sub reorder_groups($@) {
 	my $self = shift;
+	return must_be_on($self) unless $self->{is_on};
 	my @groups = @_;
 	tied(%{$self->{buddies}})->setorder(@groups);
 }
 
 sub reorder_buddies($$@) {
 	my $self = shift;
+	return must_be_on($self) unless $self->{is_on};
 	my $group = shift;
 	my @buddies = @_;
 	tied(%{$self->{buddies}->{$group}->{members}})->setorder(@buddies);
@@ -530,6 +555,7 @@ See L<add_buddy>.
 
 sub rename_group($$$) {
 	my($self, $oldgroup, $newgroup) = @_;
+	return must_be_on($self) unless $self->{is_on};
 	return send_error($self, $self->{bos}, 0, "That group does not exist", 0) unless exists $self->{buddies}->{$oldgroup};
 	$self->{buddies}->{$newgroup} = $self->{buddies}->{$oldgroup};
 	delete $self->{buddies}->{$oldgroup};
@@ -598,7 +624,8 @@ Call L<"commit_buddylist"> for the change to take effect.
 sub set_visibility($$) {
 	my($self, $vismode) = @_;
 
-	$self->{vismode} = $vismode;
+	return must_be_on($self) unless $self->{is_on};
+	$self->{visibility} = $vismode;
 }
 
 =pod
@@ -628,6 +655,7 @@ sub set_group_permissions($@) {
 	my($self, @perms) = @_;
 	my $perms = 0xFFFFFF00;
 
+	return must_be_on($self) unless $self->{is_on};
 	foreach my $perm (@perms) { $perms |= $perm; }
 	$self->{groupperms} = $perms;
 }
@@ -694,8 +722,10 @@ sub get_app_data($;$$) {
 sub mod_permit($$$@) {
 	my($self, $action, $group, @buddies) = @_;
 
+	return must_be_on($self) unless $self->{is_on};
 	if($action == MODBL_ACTION_ADD) {
 		foreach my $buddy(@buddies) {
+			next if exists($self->{$group}->{$buddy});
 			$self->{$group}->{$buddy}->{buddyid} = $self->newid($self->{group});
 		}
 	} else {
@@ -707,6 +737,7 @@ sub mod_permit($$$@) {
 
 sub mod_buddylist($$$$;@) {
 	my($self, $action, $what, $group, @buddies) = @_;
+	return must_be_on($self) unless $self->{is_on};
 
 	@buddies = ($group) if $what == MODBL_WHAT_GROUP;
 
@@ -800,12 +831,14 @@ their profile.
 
 sub get_info($$) {
 	my($self, $screenname) = @_;
+	return must_be_on($self) unless $self->{is_on};
 
 	$self->{bos}->snac_put(reqdata => $screenname, family => 0x2, subtype => 0x5, data => pack("nCa*", 1, length($screenname), $screenname));
 }
 
 sub get_away($$) {
 	my($self, $screenname) = @_;
+	return must_be_on($self) unless $self->{is_on};
 
 	$self->{bos}->snac_put(reqdata => $screenname, family => 0x2, subtype => 0x5, data => pack("nCa*", 3, length($screenname), $screenname));
 }
@@ -823,6 +856,7 @@ contact you when you are away - you must perform this yourself if you want it do
 
 sub send_im($$$;$) {
 	my($self, $to, $msg, $away) = @_;
+	return must_be_on($self) unless $self->{is_on};
 	my $packet = "";
 	my $reqid = 0;
 
@@ -915,6 +949,11 @@ sub im_parse($$) {
 			$chat = $1;
 			$chat =~ s/%([0-9A-Z]{1,2})/chr(hex($1))/eig;
 		}
+
+		$self->{chatinvites}->{$chaturl} = {
+			cookie => $cookie,
+			sender => $from
+		};
 	}
 
 	return ($from, $msg, $away, $chat, $chaturl);
@@ -937,6 +976,7 @@ like send you an instant message.
 
 sub evil($$;$) {
 	my($self, $who, $anon) = @_;
+	return must_be_on($self) unless $self->{is_on};
 
 	$self->{bos}->snac_put(reqdata => $who, family => 0x04, subtype => 0x08, data =>
 		pack("n C a*", ($anon ? 1 : 0), length($who), $who)
@@ -948,7 +988,8 @@ sub capabilities($) {
 	my $caps;
 
 	#AIM_CAPS_CHAT
-	$caps .= pack("C*", map{hex($_)} split(/[ \t\n]+/, "0x74 0x8F 0x24 0x20 0x62 0x87 0x11 0xD1 0x82 0x22 0x44 0x45 0x53 0x54 0x00 0x00"));
+	$caps .= pack("C*", map{hex($_)} split(/[ \t\n]+/,
+		"74 8F 24 20  62 87 11 D1   82 22 44 45  53 54 00 00"));	
 
 	return $caps;
 }
@@ -963,7 +1004,11 @@ marked as no longer being away.
 
 =cut
 
-sub set_away($$) { shift->set_info(undef, shift); }
+sub set_away($$) {
+	my($self, $awaymsg) = @_;
+	return must_be_on($self) unless $self->{is_on};
+	shift->set_info(undef, $awaymsg);
+}
 
 =pod
 
@@ -1031,6 +1076,7 @@ Changes the user's password.
 
 sub change_password($$$) {
 	my($self, $currpass, $newpass) = @_;
+	return must_be_on($self) unless $self->{is_on};
 
 	if($self->{adminreq}->{ADMIN_TYPE_PASSWORD_CHANGE}++) {
 		$self->callback_admin_error(ADMIN_TYPE_PASSWORD_CHANGE, ADMIN_ERROR_REQPENDING);
@@ -1060,6 +1106,7 @@ information is requested.
 
 sub confirm_account($) {
 	my($self) = shift;
+	return must_be_on($self) unless $self->{is_on};
 
 	if($self->{adminreq}->{ADMIN_TYPE_ACCOUNT_CONFIRM}++) {
 		$self->callback_admin_error(ADMIN_TYPE_ACCOUNT_CONFIRM, ADMIN_ERROR_REQPENDING);
@@ -1085,6 +1132,7 @@ user forgets it.
 
 sub change_email($$) {
 	my($self, $newmail) = @_;
+	return must_be_on($self) unless $self->{is_on};
 
 	if($self->{adminreq}->{ADMIN_TYPE_EMAIL_CHANGE}++) {
 		$self->callback_admin_error(ADMIN_TYPE_EMAIL_CHANGE, ADMIN_ERROR_REQPENDING);
@@ -1105,6 +1153,7 @@ case may be changed and spaces may be inserted or deleted.
 
 sub format_screenname($$) {
 	my($self, $newname) = @_;
+	return must_be_on($self) unless $self->{is_on};
 
 	if($self->{adminreq}->{ADMIN_TYPE_SCREENNAME_FORMAT}++) {
 		$self->callback_admin_error(ADMIN_TYPE_SCREENNAME_FORMAT, ADMIN_ERROR_REQPENDING);
@@ -1126,6 +1175,7 @@ for that.
 
 sub chat_join($$; $) {
 	my($self, $name, $exchange) = @_;
+	return must_be_on($self) unless $self->{is_on};
 	$exchange ||= 4;
 
 	$self->log_print(OSCAR_DBG_INFO, "Creating chatroom $name ($exchange).");
@@ -1145,14 +1195,37 @@ sub chat_join($$; $) {
 
 Use this to accept an invitation to join a chatroom.
 
+=item chat_decline (CHAT)
+
+Use this to decline an invitation to join a chatroom.
+
 =cut
 
 sub chat_accept($$) {
 	my($self, $chat) = @_;
+	return must_be_on($self) unless $self->{is_on};
 
-	$self->log_print(OSCAR_DBG_INFO, "Accepting chat invite for $chat.");
+	delete $self->{chatinvites}->{$chat};
+	$self->log_print(OSCAR_DBG_NOTICE, "Accepting chat invite for $chat.");
 	$self->svcdo(CONNTYPE_CHATNAV, family => 0x0D, subtype => 0x04, data =>
 		pack("nca* Cn", 4, length($chat), $chat, 0, 2)
+	);
+}
+
+sub chat_decline($$) {
+	my($self, $chat) = @_;
+	return must_be_on($self) unless $self->{is_on};
+
+	my($invite) = delete $self->{chatinvites}->{$chat} or do {
+		$self->log_print(OSCAR_DBG_WARN, "Chat invite for $chat doesn't exist, so we can't decline it.");
+		return;
+	};
+	$self->log_print(OSCAR_DBG_NOTICE, "Declining chat invite for $chat.");
+	$self->{bos}->snac_put(family => 0x04, subtype => 0x0B, data =>
+		$invite->{cookie} .
+		pack("n", 2) .
+		pack("Ca*", length($invite->{sender}), $invite->{sender}) .
+		pack("nnn", 3, 2, 1)
 	);
 }
 
@@ -1160,6 +1233,11 @@ sub crapout($$$) {
 	my($self, $connection, $reason) = @_;
 	send_error($self, $connection, 0, $reason, 1);
 	$self->signoff();
+}
+
+sub must_be_on($) {
+	my $self = shift;
+	send_error($self, $self->{bos}, 0, "You have not finished signing on.", 0);
 }
 
 =pod
@@ -1175,6 +1253,7 @@ the user as being idle.
 
 sub set_idle($$) {
 	my($self, $time) = @_;
+	return must_be_on($self) unless $self->{is_on};
 	$self->{bos}->snac_put(family => 0x1, subtype => 0x11, data => pack("N", $time));
 }
 
@@ -1346,6 +1425,7 @@ deleted.
 
 sub set_buddy_comment($$$;$) {
 	my($self, $group, $buddy, $comment) = @_;
+	return must_be_on($self) unless $self->{is_on};
 	$self->{buddies}->{$group}->{members}->{$buddy}->{comment} = $comment;
 }
 
@@ -1361,6 +1441,7 @@ instead.
 
 sub chat_invite($$$@) {
 	my($self, $chat, $msg, @who) = @_;
+	return must_be_on($self) unless $self->{is_on};
 	foreach my $who(@who) { $chat->{connection}->invite($who, $msg); }
 }
 
@@ -1564,6 +1645,19 @@ Also note that this callback is only triggered for events whose level is greater
 than or equal to the loglevel for the OSCAR session.  The L<"loglevel"> method
 allows you to get or set the loglevel.
 
+=item connection_changed OSCAR CONNECTION STATUS
+
+Called when the status of a connection changes.  The status is "read" if we
+should call C<process_one> on the connection when C<select> indicates that
+the connection is ready for reading, "write" if we should call
+C<process_one> when the connection is ready for writing, or "deleted" if the
+connection has been deleted.
+
+C<CONNECTION> is a C<Net::OSCAR::Connection> object.
+
+Users of this callback may also be interested in the L<"get_filehandle">
+method of C<Net::OSCAR::Connection>.
+
 =cut
 
 sub do_callback($@) {
@@ -1593,6 +1687,7 @@ sub callback_rate_alert(@) { do_callback("rate_alert", @_); }
 sub callback_signon_done(@) { do_callback("signon_done", @_); }
 sub callback_log(@) { do_callback("log", @_); }
 sub callback_im_ok(@) { do_callback("im_ok", @_); }
+sub callback_connection_changed(@) { do_callback("connection_changed", @_); }
 
 sub set_callback_error($\&) { set_callback("error", @_); }
 sub set_callback_buddy_in($\&) { set_callback("buddy_in", @_); }
@@ -1614,8 +1709,11 @@ sub set_callback_rate_alert($\&) { set_callback("rate_alert", @_); }
 sub set_callback_signon_done($\&) { set_callback("signon_done", @_); }
 sub set_callback_log($\&) { set_callback("log", @_); }
 sub set_callback_im_ok($\&) { set_callback("im_ok", @_); }
+sub set_callback_connection_changed($\&) { set_callback("connection_changed", @_); }
 
 =pod
+
+=back
 
 =head1 CHATS
 
@@ -1770,9 +1868,83 @@ C<$buddy = new Net::OSCAR::Screenname "Matt Sachs"> instead of
 C<$buddy = "Matt Sachs">, this will be taken care of for you when
 you use the string comparison operators (eq, ne, cmp, etc.)
 
+C<Net::OSCAR::Connection>, the class used for connection objects,
+has a C<get_filehandle> method which returns the filehandle
+(in the current implementation, a globref created via C<gensym>/C<socket>)
+used for the connection.
+
+=over 4
+
+=item get_filehandle
+
+Returns the filehandle used for the connection.  Note that this is a method
+of C<Net::OSCAR::Connection>, not C<Net::OSCAR>.
+
+=back
+
 =head1 HISTORY
 
 =over 4
+
+=item *
+
+0.25, 2001-11-26
+
+=over 4
+
+=item *
+
+Net::OSCAR is now in beta!
+
+=item *
+
+We now work with perl 5.005 and even 5.004
+
+=item *
+
+Try to prevent weird Net::OSCAR::Screenname bug where perl gets stuck in Perl_sv_2bool
+
+=item *
+
+Fixed problems with setting visibility mode and adding to deny list (thanks, Philip)
+
+=item *
+
+Added some methods to allow us to be POE-ified
+
+=item *
+
+Added guards around a number of methods to prevent the user from trying to do stuff before s/he's finished signing on.
+
+=item *
+
+Fix *incredibly* stupid error in NO_to_BLI that ate group names
+
+=item *
+
+Fixed bad bug in log_printf
+
+=item *
+
+Buddylist error handling changes
+
+=item *
+
+Added chat_decline command
+
+=item *
+
+Signon, signoff fixes
+
+=item *
+
+Allow AOL screennames to sign on
+
+=item *
+
+flap_get crash fixes
+
+=back
 
 =item *
 
@@ -2056,6 +2228,9 @@ The gaim team - the source to their libfaim client was also very helpful.  E<lt>
 The users of aimirc for being reasonably patient while this module was developed.  E<lt>http://www.zevils.com/programs/aimirc/E<gt>
 
 Jayson Baker for some last-minute debugging help.
+
+Rocco Caputo for helping to work out the hooks that let use be used with
+POE.  E<lt>http://poe.perl.org/E<gt>
 
 AOL, for creating the AOL Instant Messenger service, even though they aren't terribly helpful to
 developers of third-party clients.

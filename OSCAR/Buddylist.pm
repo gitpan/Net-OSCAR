@@ -1,14 +1,14 @@
 package Net::OSCAR::Buddylist;
 
-$VERSION = 0.09;
+$VERSION = 0.25;
 
 use strict;
 use vars qw($VERSION);
-use warnings;
 
 use Carp;
 use Net::OSCAR::Common qw(:all);
 use Net::OSCAR::Screenname;
+use Net::OSCAR::OldPerl;
 
 sub new {
 	my $pkg = shift;

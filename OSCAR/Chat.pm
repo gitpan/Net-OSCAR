@@ -1,16 +1,16 @@
 package Net::OSCAR::Chat;
 
 
-$VERSION = 0.09;
+$VERSION = 0.25;
 
 use strict;
-use warnings;
 use Carp;
 
 use Net::OSCAR::TLV;
 use Net::OSCAR::Callbacks;
 use vars qw(@ISA $VERSION);
 use Net::OSCAR::Common qw(:all);
+use Net::OSCAR::OldPerl;
 @ISA = qw(Net::OSCAR::Connection);
 
 sub invite($$;$) {

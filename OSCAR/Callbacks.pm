@@ -1,20 +1,20 @@
 package Net::OSCAR::Callbacks;
 
-$VERSION = 0.09;
+$VERSION = 0.25;
 
 use strict;
 use vars qw($VERSION);
-use warnings;
 use Carp;
 
 use Net::OSCAR::Common qw(:all);
 use Net::OSCAR::TLV;
 use Net::OSCAR::Buddylist;
 use Net::OSCAR::_BLInternal;
+use Net::OSCAR::OldPerl;
 
 use constant MAJOR => 4;
-use constant MINOR => 3;
-use constant BUILD => 2229;
+use constant MINOR => 7;
+use constant BUILD => 2480;
 
 sub capabilities() {
 	my $caps;
@@ -39,7 +39,7 @@ sub process_snac($$) {
 
 	if($conntype == CONNTYPE_LOGIN and $family == 0x17 and $subtype == 0x7) {
 		$connection->log_print(OSCAR_DBG_SIGNON, "Got authentication key.");
-		my $key = substr($data, 2);
+		my($key) = unpack("n/a*", $data);
 
 		$connection->log_print(OSCAR_DBG_SIGNON, "Sending password.");
 
@@ -52,9 +52,9 @@ sub process_snac($$) {
 			0x18 => pack("n", MINOR),
 			0x19 => pack("n", 0),
 			0x1A => pack("n", BUILD),
-			0x14 => pack("N", 0x8C),
-			0x0E => "us", # country
+			0x14 => pack("N", 0x9F),
 			0x0F => "en", # lang
+			0x0E => "us", # country
 			0x4A => pack("C", 1),
 		);
 		$connection->snac_put(family => 0x17, subtype => 0x2, data => tlv_encode(\%tlv));
@@ -81,7 +81,6 @@ sub process_snac($$) {
 				$tlv{0x05}
 			);
 		}
-
 	} elsif($family == 0x1 and $subtype == 0x7) {
 		$connection->log_print(OSCAR_DBG_NOTICE, "Got Rate Info Resp.");
 		$connection->log_print(OSCAR_DBG_NOTICE, "Sending Rate Ack.");
@@ -98,7 +97,7 @@ sub process_snac($$) {
 			$connection->snac_put(family => 0x13, subtype => 0x2);
 
 			$connection->log_print(OSCAR_DBG_DEBUG, "Requesting buddylist.");
-			$connection->snac_put(family => 0x13, subtype => 0x4);
+			$connection->snac_put(family => 0x13, subtype => 0x5, data => chr(0)x6);
 
 			$connection->log_print(OSCAR_DBG_DEBUG, "Requesting locate rights.");
 			$connection->snac_put(family => 0x2, subtype => 0x2);
@@ -151,7 +150,7 @@ sub process_snac($$) {
 		return if $errno == 0;
 		my $tlv = tlv_decode($data) if $data;
 		$error .= (ERRORS)[$errno] || "unknown error $errno";
-		$error .= "(".$tlv->{4}.")." if $tlv;
+		$error .= "(".$tlv->{4}.")." if $tlv and $tlv->{4};
 		send_error($session, $connection, $errno, (ERRORS)[$errno] || "unknown error $errno", 0, $reqdata);
 	} elsif($family == 0x1 and $subtype == 0xf) {
 		$connection->log_print(OSCAR_DBG_NOTICE, "Got user information response.");
@@ -169,6 +168,7 @@ sub process_snac($$) {
 		$connection->log_print(OSCAR_DBG_DEBUG, "Incoming bogey - er, I mean buddy - $screenname");
 
 		my $group = $session->findbuddy($screenname);
+		return unless $group; # Without this, remove_buddy screws things up until signoff/signon
 		$buddy->{buddyid} = $session->{buddies}->{$group}->{members}->{$screenname}->{buddyid};
 		$buddy->{online} = 1;
 		foreach my $key(keys %$buddy) {
@@ -216,7 +216,7 @@ sub process_snac($$) {
 	} elsif($family == 0x1 and $subtype == 0x3) {
 		$connection->log_print($connection->{conntype} == CONNTYPE_BOS ? OSCAR_DBG_SIGNON : OSCAR_DBG_NOTICE, "Got server ready.  Sending set versions.");
 
-		if($connection->{conntype} == CONNTYPE_ADMIN or $connection->{conntype} == CONNTYPE_CHAT) {
+		if($connection->{conntype} != CONNTYPE_BOS) {
 			$connection->snac_put(family => 0x1, subtype => 0x17, data =>
 				pack("n*", 1, 3, $connection->{conntype}, 1)
 			);
@@ -270,39 +270,46 @@ sub process_snac($$) {
 	} elsif($family == 0x1 and $subtype == 0x1F) {
 		$connection->log_print(OSCAR_DBG_SIGNON, "Got memory request.");
 	} elsif($family == 0x13 and $subtype == 0x3) {
-		$connection->log_print(OSCAR_DBG_NOTICE, "Got buddylist 0x0003.");
-		$connection->snac_put(family => 0x13, subtype => 0x7);
-
-		$session->set_info("");
-
-		$connection->log_print(OSCAR_DBG_DEBUG, "Setting idle.");
-		$connection->snac_put(family => 0x1, subtype => 0x11, data => pack("N", 0));
-
-		$connection->ready();
-
-		$connection->log_print(OSCAR_DBG_DEBUG, "Adding ICBM parameters.");
-		$connection->snac_put(family => 0x4, subtype => 0x2, data =>
-			pack("n*", 0, 0, 3, 0x1F40, 0x3E7, 0x3E7, 0, 0)
-		);
+		$connection->log_print(OSCAR_DBG_NOTICE, "Got buddylist 0x0003.");	
+		$session->{gotbl} = 1;
+		#$connection->snac_put(family => 0x13, subtype => 0x7);
 	} elsif($family == 0x13 and $subtype == 0x6) {
 		$connection->log_print(OSCAR_DBG_SIGNON, "Got buddylist.");
+		delete $session->{gotbl};
 
 		return unless Net::OSCAR::_BLInternal::blparse($session, $data);
 		$connection->snac_put(family => 0x13, subtype => 0x7);
-		$session->callback_signon_done() unless $session->{sent_done}++;
+		got_buddylist($session, $connection);
 	} elsif($family == 0x13 and $subtype == 0x0E) {
 		$session->{budmods}--;
 		$connection->log_print(OSCAR_DBG_DEBUG, "Got blmod ack ($session->{budmods} left).");
 		my($error) = unpack("n", $data);
 		if($error != 0) {
+			$session->{buderrors} = 1;
 			my($type, $gid, $bid) = ($reqdata->{type}, $reqdata->{gid}, $reqdata->{bid});
-			$session->{blinternal}->{$type}->{$gid}->{$bid} = $session->{blold}->{$type}->{$gid}->{$bid} if exists($session->{blold}->{$type}->{$gid}) and exists($session->{blold}->{$type}->{$gid}->{$bid});
-			Net::OSCAR::_BLInternal::BLI_to_NO($session, $type, $gid, $bid);
+			if(exists($session->{blold}->{$type}) and exists($session->{blold}->{$type}->{$gid}) and exists($session->{blold}->{$type}->{$gid}->{$bid})) {
+				$session->{blinternal}->{$type}->{$gid}->{$bid} = $session->{blold}->{$type}->{$gid}->{$bid};
+			} else {
+				delete $session->{blinternal}->{$type} unless exists($session->{blold}->{$type});
+				delete $session->{blinternal}->{$type}->{$gid} unless exists($session->{blold}->{$type}) and exists($session->{blold}->{$type}->{$gid});
+				delete $session->{blinternal}->{$type}->{$gid}->{$bid} unless exists($session->{blold}->{$type}) and exists($session->{blold}->{$type}->{$gid}) and exists($session->{blold}->{$type}->{$gid}->{$bid});
+			}
 			$session->callback_buddylist_error($error, $reqdata->{desc});
 		} else {
 			$session->callback_buddylist_ok() unless $session->{budmods} > 0;
 		}
-		delete $session->{blold} unless $session->{budmods} > 0;
+		if($session->{budmods} == 0) {
+			Net::OSCAR::_BLInternal::BLI_to_NO($session) if $session->{buderrors};
+			delete $session->{qw(blold buderrors)};
+		}
+	} elsif($family == 0x13 and $subtype == 0x0F) {
+		if($session->{gotbl}) {
+			delete $session->{gotbl};
+			$connection->log_print(OSCAR_DBG_WARN, "Couldn't get your buddylist - probably because you don't have one.");
+			got_buddylist($session, $connection);			
+		} else {
+			$connection->log_print(OSCAR_DBG_INFO, "Buddylist error:", hexdump($data));
+		}
 	} elsif($family == 0x1 and $subtype == 0x18) {
 		$connection->log_print(OSCAR_DBG_DEBUG, "Got hostversions.");
 	} elsif($family == 0x1 and $subtype == 0x1F) {
@@ -454,4 +461,26 @@ sub process_snac($$) {
 	return 1;
 }
 
+sub got_buddylist($$) {
+	my($session, $connection) = @_;
+
+	$session->set_info("") unless $session->profile;
+
+	$connection->log_print(OSCAR_DBG_DEBUG, "Adding ICBM parameters.");
+	$connection->snac_put(family => 0x4, subtype => 0x2, data =>
+		pack("n*", 0, 0, 3, 0x1F40, 0x3E7, 0x3E7, 0, 0)
+	);
+
+	$connection->log_print(OSCAR_DBG_DEBUG, "Setting idle.");
+	$connection->snac_put(family => 0x1, subtype => 0x11, data => pack("N", 0));
+
+	$connection->ready();
+
+	$session->{is_on} = 1;
+	$session->callback_signon_done() unless $session->{sent_done}++;
+
+	$connection->snac_put(family => 0x2, subtype => 0xB, data => pack("Ca*", length(normalize($session->screenname)), normalize($session->screenname)));
+}
+
 1;
+

@@ -1,9 +1,8 @@
 package Net::OSCAR::Common;
 
-$VERSION = 0.09;
+$VERSION = 0.25;
 
 use strict;
-use warnings;
 use vars qw(@ISA @EXPORT_OK %EXPORT_TAGS $VERSION);
 use Scalar::Util qw(dualvar);
 use Net::OSCAR::TLV;
@@ -180,10 +179,8 @@ sub log_print($$@) {
 	}
 }
 
-sub log_printf($$@) {
+sub log_printf($$$@) {
 	my($obj, $level, $fmtstr) = (shift, shift, shift);
-	my $session = exists($obj->{session}) ? $obj->{session} : $obj;
-	return unless $session->{DEBUG};
 
 	$obj->log_print($level, sprintf($fmtstr, @_));
 }
@@ -245,7 +242,8 @@ sub tlv_decode($;$) {
 
 	tie %retval, "Net::OSCAR::TLV";
 
-	while(length($tlv) >= 4 and (not $tlvcnt or $currtlv < $tlvcnt)) {
+	$tlvcnt = 0 unless $tlvcnt;
+	while(length($tlv) >= 4 and (!$tlvcnt or $currtlv < $tlvcnt)) {
 		($type, $len) = unpack("nn", $tlv);
 		$len = 0x2 if $type == 0x13;
 		$strpos += 4;

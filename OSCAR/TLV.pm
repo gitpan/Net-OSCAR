@@ -1,10 +1,9 @@
 package Net::OSCAR::TLV;
 
-$VERSION = 0.09;
+$VERSION = 0.25;
 
 use strict;
 use vars qw($VERSION);
-use warnings;
 
 # Extra arguments: an optional scalar which modifies the behavior of $self->{foo}->{bar} = "baz"
 # Iff foo doesn't exist, the scalar will be evaluated and assigned as the value of foo.

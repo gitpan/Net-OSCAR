@@ -1,20 +1,20 @@
 package Net::OSCAR::Connection;
 
-$VERSION = 0.09;
+$VERSION = 0.25;
 
 use strict;
 use vars qw($VERSION);
-use warnings;
 use Carp;
 use Socket;
 use Symbol;
 use Digest::MD5;
 use Fcntl;
-use Errno;
+use POSIX qw(:errno_h);
 
 use Net::OSCAR::Common qw(:all);
 use Net::OSCAR::TLV;
 use Net::OSCAR::Callbacks;
+use Net::OSCAR::OldPerl;
 
 sub new($$$$$$) { # Think you got enough parameters there, Chester?
 	my $class = ref($_[0]) || $_[0] || "Net::OSCAR::Connection";
@@ -27,6 +27,7 @@ sub new($$$$$$) { # Think you got enough parameters there, Chester?
 	$self->{conntype} = shift;
 	$self->{description} = shift;
 	$self->connect(shift);
+
 	return $self;
 }
 
@@ -50,7 +51,7 @@ sub flap_encode($$;$) {
 sub flap_put($$;$) {
 	my($self, $msg, $channel) = @_;
 	my $emsg = $self->flap_encode($msg, $channel);
-	syswrite($self->{socket}, $emsg) or return $self->{session}->crapout($self, "Couldn't write to socket: $!");
+	syswrite($self->{socket}, $emsg, length($emsg)) or return $self->{session}->crapout($self, "Couldn't write to socket: $!");
 	$self->log_print(OSCAR_DBG_PACKETS, "Put ", hexdump($emsg));
 }
 
@@ -60,34 +61,55 @@ sub flap_get($) {
 	my ($buffer, $channel, $len);
 	my $nchars;
 
-	if(!sysread($self->{socket}, $buffer, 6)) {
-		if($self == $self->{session}->{bos}) {
-			$self->{session}->crapout($self, "$!");
+	if(!exists($self->{buff_gotflap})) {
+		$self->{buffsize} ||= 6;
+		$self->{buffer} ||= "";
+
+		if(!sysread($self->{socket}, $buffer, $self->{buffsize} - length($self->{buffer}))) {
+			if($self == $self->{session}->{bos}) {
+				return $self->{session}->crapout($self, "$!");
+			} else {
+				$self->log_print(OSCAR_DBG_NOTICE, "Lost connection.");
+				$self->{sockerr} = 1;
+				$self->disconnect();
+				return undef;
+			}
 		} else {
-			$self->log_print(OSCAR_DBG_NOTICE, "Lost connection.");
-			$self->{sockerr} = 1;
-			$self->disconnect();
-			return undef;
+			$self->{buffer} .= $buffer;
+		}
+
+		if(length($self->{buffer}) == 6) {
+			$self->{buff_gotflap} = 1;
+			($buffer) = delete $self->{buffer};
+			(undef, $self->{channel}, undef, $self->{buffsize}) = unpack("CCnn", $buffer);
+			$self->{buffer} = "";
+		} else {
+			return "";
 		}
 	}
-	(undef, $channel, undef, $len) = unpack("CCnn", $buffer);
-	$self->{channel} = $channel;
-	$nchars = sysread($self->{socket}, $buffer, $len);
+
+	$nchars = sysread($self->{socket}, $buffer, $self->{buffsize} - length($self->{buffer}));
 	if(!$nchars) {
 		$self->log_print(OSCAR_DBG_NOTICE, "Lost connection.");
 		$self->{sockerr} = 1;
 		$self->disconnect();
 		return undef;
-	}
-	if($len > $nchars) {
-		my $abuff = "";
-		$len -= $nchars;
-		$nchars = sysread($self->{socket}, $abuff, $len);
-		$buffer .= $abuff;
+	} else {
+		$self->{buffer} .= $buffer;
 	}
 
-	$self->log_print(OSCAR_DBG_PACKETS, "Got ", hexdump($buffer));
-	return $buffer;
+	if(length($self->{buffer}) == $self->{buffsize}) {
+		$self->log_print(OSCAR_DBG_PACKETS, "Got ", hexdump($self->{buffer}));
+		$buffer = $self->{buffer};
+
+		delete $self->{buffer};
+		delete $self->{buff_gotflap};
+		delete $self->{buffsize};
+
+		return $buffer;
+	} else {
+		return "";
+	}
 }
 
 sub snac_encode($%) {
@@ -107,7 +129,8 @@ sub snac_encode($%) {
 
 sub snac_put($%) {
 	my($self, %snac) = @_;
-	$self->flap_put($self->snac_encode(%snac));
+	$snac{channel} ||= FLAP_CHAN_SNAC;
+	$self->flap_put($self->snac_encode(%snac), $snac{channel});
 }
 
 sub snac_get($) {
@@ -202,12 +225,14 @@ sub connect($$) {
 	$self->set_blocking(0);
 	my $addr = inet_aton($host) or return $self->{session}->crapout($self, "Couldn't resolve $host.");
 	if(!connect($self->{socket}, sockaddr_in($port, $addr))) {
-		return 1 if $!{EINPROGRESS};
+		return 1 if $! == EINPROGRESS;
 		croak "Couldn't connect to $host:$port: $!";
 	}
 
 	return 1;
 }
+
+sub get_filehandle($) { shift->{socket}; }
 
 sub process_one($) {
 	my $self = shift;
@@ -219,7 +244,8 @@ sub process_one($) {
 	if(!$self->{connected}) {
 		$self->log_print(OSCAR_DBG_NOTICE, "Connected.");
 		$self->{connected} = 1;
-		$self->set_blocking(1);
+		#$self->set_blocking(1);
+		$self->{session}->callback_connection_changed($self, "read");
 		return 1;
 	} elsif(!$self->{ready}) {
 		$self->log_print(OSCAR_DBG_DEBUG, "Getting connack.");
@@ -230,7 +256,7 @@ sub process_one($) {
 		} else {
 			$self->log_print(OSCAR_DBG_DEBUG, "Got connack.");
 		}
-		$self->{session}->crapout($self, "Got bad connack from server") unless $self->{channel} == FLAP_CHAN_NEWCONN;
+		return $self->{session}->crapout($self, "Got bad connack from server") unless $self->{channel} == FLAP_CHAN_NEWCONN;
 
 		if($self->{conntype} == CONNTYPE_LOGIN) {
 			$self->log_print(OSCAR_DBG_DEBUG, "Got connack.  Sending connack.");
@@ -246,8 +272,13 @@ sub process_one($) {
 			$self->flap_put(tlv_encode(\%tlv));
 		} else {
 			$self->log_print(OSCAR_DBG_NOTICE, "Sending BOS-Signon.");
-			%tlv = (0x06 =>$self->{auth});
-			$self->flap_put(pack("N", 1) . tlv_encode(\%tlv), FLAP_CHAN_NEWCONN);
+			#%tlv = (0x06 =>$self->{auth});
+			#$self->flap_put(pack("N", 1) . tlv_encode(\%tlv), FLAP_CHAN_NEWCONN);
+			$self->snac_put(family => 0, subtype => 1,
+				flags2 => 0x6,
+				reqid => 0x01000000 | (unpack("n", substr($self->{auth}, 0, 2)))[0],
+				data => substr($self->{auth}, 2),
+				channel => FLAP_CHAN_NEWCONN);
 		}
 		$self->log_print(OSCAR_DBG_DEBUG, "SNAC time.");
 		return $self->{ready} = 1;
