@@ -1268,6 +1268,11 @@ HIGH-PERFORMANCE EVENT PROCESSING
     For optimum performance, use the "connection_changed" callback.
 
 HISTORY
+    *   1.907, 2004-09-22
+
+        *   Fixed assert failure on certain invalid input ("Buddy Trikill"
+            crash)
+
     *   1.906, 2004-08-28
 
         *   Reorganized documentation

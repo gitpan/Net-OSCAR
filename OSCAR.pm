@@ -1,7 +1,7 @@
 package Net::OSCAR;
 
-$VERSION = '1.906';
-$REVISION = '$Revision: 1.173.2.20 $';
+$VERSION = '1.907';
+$REVISION = '$Revision: 1.173.2.21 $';
 
 =pod
 
@@ -2667,6 +2667,18 @@ For optimum performance, use the L<"connection_changed"> callback.
 =head1 HISTORY
 
 =over 4
+
+=item *
+
+1.907, 2004-09-22
+
+=over 4
+
+=item *
+
+Fixed assert failure on certain invalid input ("Buddy Trikill" crash)
+
+=back
 
 =item *
 
