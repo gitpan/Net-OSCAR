@@ -645,10 +645,11 @@ METHODS
             Time that the user signed on to the service, in the same format
             as the "time" function.
 
-        idle
-            Time that the user has been idle for, in seconds. If this key is
-            present but zero, the user is not idle. If this key is not
-            present, the user is not reporting idle time.
+        idle_since
+            Time, in seconds since Jan 1st 1970, since which the user has
+            been idle. This will only be present if the user is idle. To
+            figure out how long the user has been idle for, subtract this
+            value from "time()" .
 
         evil
             Evil (warning) level for the user.
@@ -1059,6 +1060,16 @@ MISCELLANEOUS
         "Net::OSCAR::Connection".
 
 HISTORY
+    *   1.10, 2004-02-10
+
+        *   Fixed idle time handling; user info hashes now have an
+            'idle_since' key, which you should use instead of the old 'idle'
+            key. Subtract "idle_since" from "time()" to get the length of
+            time for which the user has been idle.
+
+        *   Fixed buddylist type 5 handling; this fixes problems modifying
+            the buddylists of recently-created screennames.
+
     *   1.01, 2004-01-06
 
         *   Fixed buddy ID generation (problems adding buddies)

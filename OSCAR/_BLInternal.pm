@@ -16,8 +16,8 @@ use Net::OSCAR::Constants;
 use Net::OSCAR::Utility;
 
 use vars qw($VERSION $REVISION);
-$VERSION = '1.01';
-$REVISION = '$Revision: 1.32.6.9 $';
+$VERSION = '1.10';
+$REVISION = '$Revision: 1.32.6.11 $';
 
 sub init_entry($$$$) {
 	my($blinternal, $type, $gid, $bid) = @_;
@@ -72,6 +72,7 @@ sub BLI_to_NO($) {
 	delete $session->{profile};
 	delete $session->{appdata};
 	delete $session->{showidle};
+	delete $session->{presence_unknown};
 
 	$session->{buddies} = bltie(1);
 	$session->{permit} = bltie;
@@ -115,9 +116,15 @@ sub BLI_to_NO($) {
 		$session->{groupperms} = 0xFFFFFFFF;
 	}
 
-	if(exists $bli->{5}) {
-		# Not yet implemented
-		($session->{showidle}) = unpack("N", $bli->{5}->{0}->{19719}->{data}->{0xC9} || pack("N", 1));
+	if(exists $bli->{4} and (my($presbid) = keys %{$bli->{5}->{0}})) {
+		my $typedata = $bli->{5}->{0}->{$presbid}->{data};
+		($session->{showidle}) = unpack("N", $typedata->{0xC9} || pack("F", 0x0061E7FF));
+		($session->{presence_unknown}) = unpack("N", $typedata->{0xD6} || pack("F", 0x0077FFFF));
+		delete $typedata->{0xC9};
+		delete $typedata->{0xD6};
+	} else {
+		$session->{showidle} = 0x0061E7FF;
+		$session->{presence_unknown} = 0x0077FFFF;
 	}
 
 	if(exists $bli->{0x14}) {
@@ -219,10 +226,13 @@ sub NO_to_BLI($) {
 		$bli->{4}->{0}->{$vistype}->{data}->{$appdata} = $session->{appdata}->{$appdata};
 	}
 
-	if(exists($session->{showidle})) {
-		init_entry($bli, 5, 0, 0x4D07);
-		$bli->{5}->{0}->{0x4D07}->{data}->{0xC9} = pack("N", $session->{showidle});
-	}
+	my $presencetype;
+	$presencetype = (keys %{$session->{blinternal}->{5}->{0}})[0] if exists($session->{blinternal}->{5}) and exists($session->{blinternal}->{5}->{0}) and scalar keys %{$session->{blinternal}->{5}->{0}};
+	$presencetype ||= 0x0001;
+	init_entry($bli, 5, 0, $presencetype);
+	$bli->{5}->{0}->{$presencetype}->{data}->{0xC9} = pack("N", exists($session->{showidle}) ? $session->{showidle} : 0x0061E7FF);
+	$bli->{5}->{0}->{$presencetype}->{data}->{0xD6} = pack("N", exists($session->{presence_unknown}) ? $session->{presence_unknown} : 0x0077FFFF);
+
 
 	if(exists($session->{icon_md5sum})) {
 		init_entry($bli, 0x14, 0, 0x51F4);

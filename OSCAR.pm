@@ -1,7 +1,7 @@
 package Net::OSCAR;
 
-$VERSION = '1.01';
-$REVISION = '$Revision: 1.146.4.17 $';
+$VERSION = '1.10';
+$REVISION = '$Revision: 1.146.4.19 $';
 
 =head1 NAME
 
@@ -1023,6 +1023,7 @@ sub extract_userinfo($$) {
 	($retval->{membersince}) = unpack("N", $tlv->{2}) if exists($tlv->{2});
 	($retval->{onsince}) = unpack("N", $tlv->{3}) if exists($tlv->{3});
 	($retval->{idle}) = unpack("n", $tlv->{4})*60 if exists($tlv->{4});
+	$retval->{idle_since} = time() - $retval->{idle} if $retval->{idle};
 	if(exists($tlv->{0xD})) {
 		$self->log_print(OSCAR_DBG_DEBUG, "Got capabilities block.");
 		$retval->{capabilities} = {};
@@ -1898,10 +1899,11 @@ Time that the user's account was created, in the same format as the C<time> func
 
 Time that the user signed on to the service, in the same format as the C<time> function.
 
-=item idle
+=item idle_since
 
-Time that the user has been idle for, in seconds.  If this key is present but zero,
-the user is not idle.  If this key is not present, the user is not reporting idle time.
+Time, in seconds since Jan 1st 1970, since which the user has been idle.  This will only
+be present if the user is idle.  To figure out how long the user has been idle for,
+subtract this value from C<time()> .
 
 =item evil
 
@@ -2551,6 +2553,25 @@ Returns the C<Net::OSCAR> object associated with this C<Net::OSCAR::Connection>.
 =head1 HISTORY
 
 =over 4
+
+=item *
+
+1.10, 2004-02-10
+
+=over 4
+
+=item *
+
+Fixed idle time handling; user info hashes now have an 'idle_since' key,
+which you should use instead of the old 'idle' key.  Subtract C<idle_since>
+from C<time()> to get the length of time for which the user has been idle.
+
+=item *
+
+Fixed buddylist type 5 handling; this fixes problems modifying the buddylists
+of recently-created screennames.
+
+=back
 
 =item *
 

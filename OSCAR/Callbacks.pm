@@ -6,8 +6,8 @@ Net::OSCAR::Callbacks -- Process responses from OSCAR server
 
 package Net::OSCAR::Callbacks;
 
-$VERSION = '1.01';
-$REVISION = '$Revision: 1.97.6.13 $';
+$VERSION = '1.10';
+$REVISION = '$Revision: 1.97.6.15 $';
 
 use strict;
 use vars qw($VERSION);
@@ -185,6 +185,7 @@ sub process_snac($$) {
 		}
 		if(exists($session->{buddies}->{$group}->{members}->{$screenname}->{idle}) and !exists($buddy->{idle})) {
 			delete $session->{buddies}->{$group}->{members}->{$screenname}->{idle};
+			delete $session->{buddies}->{$group}->{members}->{$screenname}->{idle_since};
 		}
 
 		# Sync $session->{userinfo}->{$foo} with buddylist entry
