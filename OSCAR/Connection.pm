@@ -6,8 +6,8 @@ Net::OSCAR::Connection -- individual Net::OSCAR service connection
 
 package Net::OSCAR::Connection;
 
-$VERSION = '1.00';
-$REVISION = '$Revision: 1.65.4.7 $';
+$VERSION = '1.01';
+$REVISION = '$Revision: 1.65.4.8 $';
 
 use strict;
 use vars qw($VERSION);

@@ -1,7 +1,7 @@
 package Net::OSCAR;
 
-$VERSION = '1.00';
-$REVISION = '$Revision: 1.146.4.15 $';
+$VERSION = '1.01';
+$REVISION = '$Revision: 1.146.4.17 $';
 
 =head1 NAME
 
@@ -648,7 +648,7 @@ sub newid($;$) {
 
 	if($group) {
 		%ids = map { $_->{buddyid} => 1 } values %$group;
-		do { ++$id; } while($ids{$id}) and $id < 4;
+		do { ++$id; } while($ids{$id}) or $id < 4;
 	} else {
 		do { $id = ++$self->{nextid}->{__GROUPID__}; } while($self->findgroup($id));
 	}
@@ -2551,6 +2551,18 @@ Returns the C<Net::OSCAR> object associated with this C<Net::OSCAR::Connection>.
 =head1 HISTORY
 
 =over 4
+
+=item *
+
+1.01, 2004-01-06
+
+=over 4
+
+=item *
+
+Fixed buddy ID generation (problems adding buddies)
+
+=back
 
 =item *
 

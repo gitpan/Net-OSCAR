@@ -1059,6 +1059,10 @@ MISCELLANEOUS
         "Net::OSCAR::Connection".
 
 HISTORY
+    *   1.01, 2004-01-06
+
+        *   Fixed buddy ID generation (problems adding buddies)
+
     *   1.00, 2004-01-03
 
         *   Documented requirement to wait for buddylist_foo callback

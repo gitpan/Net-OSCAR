@@ -16,8 +16,8 @@ use Net::OSCAR::Constants;
 use Net::OSCAR::Utility;
 
 use vars qw($VERSION $REVISION);
-$VERSION = '1.00';
-$REVISION = '$Revision: 1.32.6.8 $';
+$VERSION = '1.01';
+$REVISION = '$Revision: 1.32.6.9 $';
 
 sub init_entry($$$$) {
 	my($blinternal, $type, $gid, $bid) = @_;
