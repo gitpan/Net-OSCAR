@@ -48,14 +48,14 @@ ABSTRACT
     Compatibility" for more information.
 
 EVENT PROCESSING
-    There are two main ways for the module to handle event processing. The
+    There are three main ways for the module to handle event processing. The
     first is to call the do_one_loop method, which performs a "select" call
     on all the object's sockets and reads incoming commands from the OSCAR
     server on any connections which have them. The "select" call has a
     default timeout of 0.01 seconds which can be adjust using the timeout
     method.
 
-    The other way of doing event processing is designed to make it easy to
+    A second way of doing event processing is designed to make it easy to
     integrate "Net::OSCAR" into an existing "select"-based event loop,
     especially one where you have many "Net::OSCAR" objects. Simply call the
     "process_connections" method with references to the lists of readers,
@@ -81,6 +81,24 @@ EVENT PROCESSING
             # Now $rin, $win, and $ein only have the file descriptors not
             # associated with any of the OSCAR objects in them - we can
             # process our events.
+
+    The third way of doing connection processing uses the
+    "connection_changed" callback in conjunction with
+    "Net::OSCAR::Connection"'s "process_one" method. This method, in
+    conjunction with "IO::Poll", probably offers the highest performance in
+    situations where you have a long-lived application which creates and
+    destroys many "Net::OSCAR" sessions; that is, an application whose list
+    of file descriptors to monitor will likely be sparse. However, this
+    method is the most complicated. What you need to do is call
+    "IO::Poll::mask" inside of the "connection_changed" callback. That
+    part's simple. The tricky bit is figuring out which
+    "Net::OSCAR::Connection::process_one"'s to call and how to call them. My
+    recommendation for doing this is to use a hashmap whose keys are the
+    file descriptors of everything you're monitoring in the "IO::Poll" - the
+    FDs can be retrieved by doing "fileno($connection->get_filehandle)"
+    inside of the "connection_changed" - and then calling "@handles =
+    $poll->handles(POLLIN | POLLOUT | POLLERR | POLLHUP)" and walking
+    through the handles.
 
 FUNCTIONALITY
     "Net::OSCAR" pretends to be WinAIM 4.7.2480. It supports remote
@@ -714,7 +732,8 @@ CALLBACKS
         if we should call "process_one" on the connection when "select"
         indicates that the connection is ready for reading, "write" if we
         should call "process_one" when the connection is ready for writing,
-        or "deleted" if the connection has been deleted.
+        "readwrite" if "process_one" should be called in both cases, or
+        "deleted" if the connection has been deleted.
 
         "CONNECTION" is a "Net::OSCAR::Connection" object.
 
@@ -823,16 +842,38 @@ MISCELLANEOUS
     this will be taken care of for you when you use the string comparison
     operators (eq, ne, cmp, etc.)
 
-    "Net::OSCAR::Connection", the class used for connection objects, has a
-    "get_filehandle" method which returns the filehandle (in the current
-    implementation, a globref created via "gensym"/"socket") used for the
-    connection.
+    "Net::OSCAR::Connection", the class used for connection objects, has
+    some methods that may or may not be useful to you.
 
     get_filehandle
         Returns the filehandle used for the connection. Note that this is a
         method of "Net::OSCAR::Connection", not "Net::OSCAR".
 
+    process_one (CAN_READ, CAN_WRITE, HAS_ERROR)
+        Call this when a "Net::OSCAR::Connection" is ready for reading
+        and/or writing. You might call this yourself instead of using
+        "process_connections" when, for instance, using the
+        "connection_changed" callback in conjunction with "IO::Poll" instead
+        of "select". The "CAN_READ" and "CAN_WRITE" parameters should be
+        non-zero if the connection is ready for the respective operations to
+        be performed and zero otherwise. If and only if there was a socket
+        error with the connection, set "HAS_ERROR" to non-zero.
+
+    session
+        Returns the "Net::OSCAR" object associated with this
+        "Net::OSCAR::Connection".
+
 HISTORY
+    *   0.60, 2002-02-17
+
+        *   Various connectino_changed fixes, including the new readwrite
+            status.
+
+        *   Added Net::OSCAR::Connection::session method
+
+        *   Improved Net::OSCAR::Connection::process_one, documented it, and
+            documented using it
+
     *   0.59, 2002-02-15
 
         *   Protocol fixes - solves problem with AOL calling us an

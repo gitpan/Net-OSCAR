@@ -1,6 +1,6 @@
 package Net::OSCAR;
 
-$VERSION = 0.59;
+$VERSION = 0.60;
 
 =head1 NAME
 
@@ -55,13 +55,13 @@ C<OSCAR>.  See the section on L<Net::AIM Compatibility> for more information.
 
 =head1 EVENT PROCESSING
 
-There are two main ways for the module to handle event processing.  The first is to
+There are three main ways for the module to handle event processing.  The first is to
 call the L<do_one_loop> method, which performs a C<select> call on all the object's
 sockets and reads incoming commands from the OSCAR server on any connections which
 have them.  The C<select> call has a default timeout of 0.01 seconds which can
 be adjust using the L<timeout> method.
 
-The other way of doing event processing is designed to make it easy to integrate
+A second way of doing event processing is designed to make it easy to integrate
 C<Net::OSCAR> into an existing C<select>-based event loop, especially one where you
 have many C<Net::OSCAR> objects.  Simply call the L<"process_connections"> method
 with references to the lists of readers, writers, and errors given to you by
@@ -86,6 +86,22 @@ demonstrates how to use this method with multiple C<Net::OSCAR> objects:
 	# Now $rin, $win, and $ein only have the file descriptors not
 	# associated with any of the OSCAR objects in them - we can
 	# process our events.
+
+The third way of doing connection processing uses the L<"connection_changed">
+callback in conjunction with C<Net::OSCAR::Connection>'s L<"process_one"> method.
+This method, in conjunction with C<IO::Poll>, probably offers the highest performance
+in situations where you have a long-lived application which creates and destroys many
+C<Net::OSCAR> sessions; that is, an application whose list of file descriptors to
+monitor will likely be sparse.  However, this method is the most complicated.
+What you need to do is call C<IO::Poll::mask> inside of the L<"connection_changed">
+callback.  That part's simple.  The tricky bit is figuring out which
+C<Net::OSCAR::Connection::process_one>'s to call and how to call them.  My recommendation
+for doing this is to use a hashmap whose keys are the file descriptors of everything
+you're monitoring in the C<IO::Poll> - the FDs can be retrieved by doing
+C<fileno($connection-E<gt>get_filehandle)> inside of the L<"connection_changed"> -
+and then calling C<@handles = $poll-E<gt>handles(POLLIN | POLLOUT | POLLERR | POLLHUP)>
+and walking through the handles.
+
 
 =head1 FUNCTIONALITY
 
@@ -341,6 +357,7 @@ sub delconn($$) {
 	my($self, $connection) = @_;
 
 	return unless $self->{connections};
+	$self->callback_connection_changed($connection, "deleted");
 	for(my $i = scalar @{$self->{connections}} - 1; $i >= 0; $i--) {
 		next unless !$connection->{socket} or (fileno $connection->{socket} == fileno $self->{connections}->[$i]->{socket});
 		next unless $connection->{conntype} == $self->{connections}->[$i]->{conntype}; # Just in case fileno is undef.
@@ -353,7 +370,6 @@ sub delconn($$) {
 			};
 		} else {
 			if($connection->{conntype} == CONNTYPE_BOS or ($connection->{conntype} == CONNTYPE_LOGIN and !$connection->{closing})) {
-				$self->callback_connection_changed($connection, "deleted");
 				delete $connection->{socket};
 				return $self->crapout($connection, "Lost connection to BOS");
 			} elsif($connection->{conntype} == CONNTYPE_CHATNAV) {
@@ -365,7 +381,6 @@ sub delconn($$) {
 				$self->callback_chat_closed($connection, "Lost connection to chat");
 			}
 		}
-		$self->callback_connection_changed($connection, "deleted");
 		delete $connection->{socket};
 		return 1;
 	}
@@ -1789,10 +1804,10 @@ allows you to get or set the loglevel.
 =item connection_changed (OSCAR, CONNECTION, STATUS)
 
 Called when the status of a connection changes.  The status is "read" if we
-should call C<process_one> on the connection when C<select> indicates that
+should call L<"process_one"> on the connection when C<select> indicates that
 the connection is ready for reading, "write" if we should call
-C<process_one> when the connection is ready for writing, or "deleted" if the
-connection has been deleted.
+L<"process_one"> when the connection is ready for writing, "readwrite" if L<"process_one">
+should be called in both cases, or "deleted" if the connection has been deleted.
 
 C<CONNECTION> is a C<Net::OSCAR::Connection> object.
 
@@ -2024,9 +2039,7 @@ C<$buddy = "Matt Sachs">, this will be taken care of for you when
 you use the string comparison operators (eq, ne, cmp, etc.)
 
 C<Net::OSCAR::Connection>, the class used for connection objects,
-has a C<get_filehandle> method which returns the filehandle
-(in the current implementation, a globref created via C<gensym>/C<socket>)
-used for the connection.
+has some methods that may or may not be useful to you.
 
 =over 4
 
@@ -2035,11 +2048,45 @@ used for the connection.
 Returns the filehandle used for the connection.  Note that this is a method
 of C<Net::OSCAR::Connection>, not C<Net::OSCAR>.
 
+=item process_one (CAN_READ, CAN_WRITE, HAS_ERROR)
+
+Call this when a C<Net::OSCAR::Connection> is ready for reading and/or
+writing.  You might call this yourself instead of using L<"process_connections">
+when, for instance, using the L<"connection_changed"> callback in conjunction with
+C<IO::Poll> instead of C<select>.  The C<CAN_READ> and C<CAN_WRITE> parameters
+should be non-zero if the connection is ready for the respective operations to be
+performed and zero otherwise.  If and only if there was a socket error with the
+connection, set C<HAS_ERROR> to non-zero.
+
+=item session
+
+Returns the C<Net::OSCAR> object associated with this C<Net::OSCAR::Connection>.
+
 =back
 
 =head1 HISTORY
 
 =over 4
+
+=item *
+
+0.60, 2002-02-17
+
+=over 4
+
+=item *
+
+Various connectino_changed fixes, including the new readwrite status.
+
+=item *
+
+Added Net::OSCAR::Connection::session method
+
+=item *
+
+Improved Net::OSCAR::Connection::process_one, documented it, and documented using it
+
+=back
 
 =item *
 
