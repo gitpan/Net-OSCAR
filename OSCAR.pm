@@ -1,7 +1,7 @@
 package Net::OSCAR;
 
-$VERSION = '1.10';
-$REVISION = '$Revision: 1.146.4.19 $';
+$VERSION = '1.11';
+$REVISION = '$Revision: 1.146.4.21 $';
 
 =head1 NAME
 
@@ -2553,6 +2553,18 @@ Returns the C<Net::OSCAR> object associated with this C<Net::OSCAR::Connection>.
 =head1 HISTORY
 
 =over 4
+
+=item *
+
+1.11, 2004-02-13
+
+=over 4
+
+=item *
+
+Fixed presence-related problems modifying some buddylists
+
+=back
 
 =item *
 

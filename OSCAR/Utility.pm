@@ -6,8 +6,8 @@ Net::OSCAR::Utility -- internal utility functions for Net::OSCAR
 
 package Net::OSCAR::Utility;
 
-$VERSION = '1.10';
-$REVISION = '$Revision: 1.2.6.9 $';
+$VERSION = '1.11';
+$REVISION = '$Revision: 1.2.6.10 $';
 
 use strict;
 use vars qw(@ISA @EXPORT $VERSION);

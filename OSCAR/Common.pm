@@ -6,8 +6,8 @@ Net::OSCAR::Common -- Net::OSCAR public constants
 
 package Net::OSCAR::Common;
 
-$VERSION = '1.10';
-$REVISION = '$Revision: 1.58.6.8 $';
+$VERSION = '1.11';
+$REVISION = '$Revision: 1.58.6.9 $';
 
 use strict;
 use vars qw(@ISA @EXPORT_OK %EXPORT_TAGS $VERSION);

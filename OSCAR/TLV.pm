@@ -9,8 +9,8 @@ This class also preserves the ordering of its keys.
 
 package Net::OSCAR::TLV;
 
-$VERSION = '1.10';
-$REVISION = '$Revision: 1.23.6.8 $';
+$VERSION = '1.11';
+$REVISION = '$Revision: 1.23.6.9 $';
 
 use strict;
 use vars qw($VERSION);

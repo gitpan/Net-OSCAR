@@ -4,7 +4,7 @@ use ExtUtils::MakeMaker;
 WriteMakefile
   (
    NAME        => 'Net::OSCAR',
-   VERSION     => '1.10',
+   VERSION     => '1.11',
    PL_FILES    => {},
    INSTALLDIRS => 'site',
    PREREQ_PM   => {

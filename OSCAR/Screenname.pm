@@ -14,8 +14,8 @@ will be true.
 
 package Net::OSCAR::Screenname;
 
-$VERSION = '1.10';
-$REVISION = '$Revision: 1.20.6.8 $';
+$VERSION = '1.11';
+$REVISION = '$Revision: 1.20.6.9 $';
 
 use strict;
 use vars qw($VERSION);

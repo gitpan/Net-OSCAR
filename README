@@ -1060,6 +1060,10 @@ MISCELLANEOUS
         "Net::OSCAR::Connection".
 
 HISTORY
+    *   1.11, 2004-02-13
+
+        *   Fixed presence-related problems modifying some buddylists
+
     *   1.10, 2004-02-10
 
         *   Fixed idle time handling; user info hashes now have an
