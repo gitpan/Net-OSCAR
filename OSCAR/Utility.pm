@@ -6,29 +6,24 @@ Net::OSCAR::Utility -- internal utility functions for Net::OSCAR
 
 package Net::OSCAR::Utility;
 
-$VERSION = '1.11';
-$REVISION = '$Revision: 1.2.6.10 $';
+$VERSION = '1.905';
+$REVISION = '$Revision: 1.19.2.8 $';
 
 use strict;
 use vars qw(@ISA @EXPORT $VERSION);
-use Digest::MD5;
+use Digest::MD5 qw(md5);
+use Carp;
 
 use Net::OSCAR::TLV;
-use Net::OSCAR::OldPerl;
-use Carp;
+use Net::OSCAR::Common qw(:loglevels);
+use Net::OSCAR::Constants;
+
 require Exporter;
 @ISA = qw(Exporter);
 @EXPORT = qw(
-	randchars log_print log_printf hexdump normalize tlv_decode tlv_encode tlv send_error bltie signon_tlv encode_password
+	randchars log_print log_printf log_print_cond log_printf_cond hexdump normalize tlv_decode tlv_encode send_error bltie
+	signon_tlv encode_password send_versions
 );
-
-sub tlv(;@) {
-	my %tlv = ();
-	tie %tlv, "Net::OSCAR::TLV";
-	while(@_) { my($key, $value) = (shift, shift); $tlv{$key} = $value; }
-	return \%tlv;
-}
-
 
 sub randchars($) {
 	my $count = shift;
@@ -36,6 +31,7 @@ sub randchars($) {
 	for(my $i = 0; $i < $count; $i++) { $retval .= chr(int(rand(256))); }
 	return $retval;
 }
+
 
 sub log_print($$@) {
 	my($obj, $level) = (shift, shift);
@@ -60,16 +56,34 @@ sub log_printf($$$@) {
 	$obj->log_print($level, sprintf($fmtstr, @_));
 }
 
-sub hexdump($) {
+sub log_printf_cond($$&) {
+	my($obj, $level, $sub) = @_;
+	my $session = exists($obj->{session}) ? $obj->{session} : $obj;
+	return unless defined($session->{LOGLEVEL}) and $session->{LOGLEVEL} >= $level;
+
+	log_printf($obj, $level, &$sub);
+}
+
+sub log_print_cond($$&) {
+	my($obj, $level, $sub) = @_;
+	my $session = exists($obj->{session}) ? $obj->{session} : $obj;
+	return unless defined($session->{LOGLEVEL}) and $session->{LOGLEVEL} >= $level;
+
+	log_print($obj, $level, &$sub);
+}
+
+sub hexdump($;$) {
 	my $stuff = shift;
+	my $forcehex = shift || 0;
 	my $retbuff = "";
 	my @stuff;
 
+	return "" unless defined($stuff);
 	for(my $i = 0; $i < length($stuff); $i++) {
 		push @stuff, substr($stuff, $i, 1);
 	}
 
-	return $stuff unless grep { $_ lt chr(0x20) or $_ gt chr(0x7E) } @stuff;
+	return $stuff unless $forcehex or grep { $_ lt chr(0x20) or $_ gt chr(0x7E) } @stuff;
 	while(@stuff) {
 		my $i = 0;
 		$retbuff .= "\n\t";
@@ -140,7 +154,7 @@ sub tlv_encode($) {
 	my $tlv = shift;
 	my($buffer, $type, $value) = ("", 0, "");
 
-	confess "You must use a tied Net::OSCAR::TLV hash!" unless defined($tlv) and ref($tlv) eq "HASH" and defined(%$tlv) and tied(%$tlv)->isa("Net::OSCAR::TLV");
+	confess "You must use a tied Net::OSCAR::TLV hash!" unless defined($tlv) and ref($tlv) eq "HASH" and defined(%$tlv) and defined(tied(%$tlv)) and tied(%$tlv)->isa("Net::OSCAR::TLV");
 	while (($type, $value) = each %$tlv) {
 		$value ||= "";
 		$buffer .= pack("nna*", $type, length($value), $value);
@@ -164,36 +178,39 @@ sub bltie(;$) {
 sub signon_tlv($;$$) {
 	my($session, $password, $key) = @_;
 
-	my $tlv = tlv(
-		0x01 => $session->{screenname},
-		0x03 => $session->{svcdata}->{clistr},
-		0x16 => pack("n", $session->{svcdata}->{supermajor}),
-		0x17 => pack("n", $session->{svcdata}->{major}),
-		0x18 => pack("n", $session->{svcdata}->{minor}),
-		0x19 => pack("n", $session->{svcdata}->{subminor}),
-		0x1A => pack("n", $session->{svcdata}->{build}),
-		0x14 => pack("N", $session->{svcdata}->{subbuild}),
-		0x0F => "en", # lang
-		0x0E => "us", # country
-		0x4A => pack("C", 1), # Use SSI
+	my %protodata = (
+		screenname => $session->{screenname},
+		clistr => $session->{svcdata}->{clistr},
+		supermajor => $session->{svcdata}->{supermajor},
+		major => $session->{svcdata}->{major},
+		minor => $session->{svcdata}->{minor},
+		subminor => $session->{svcdata}->{subminor},
+		build => $session->{svcdata}->{build},
+		subbuild => $session->{svcdata}->{subbuild},
 	);
 
 	if($session->{svcdata}->{hashlogin}) {
-		$tlv->{0x02} = encode_password($session, $password);
+		$protodata{password} = encode_password($session, $password);
 	} else {
 		if($session->{auth_response}) {
-			($tlv->{0x25}) = delete $session->{auth_response};
+			$protodata{auth_response} = delete $session->{auth_response};
 		} else {
-			$tlv->{0x25} = encode_password($session, $password, $key);
-		}
-		$tlv->{0x4A} = pack("C", 1);
+			# As of AIM 5.5, the password can be MD5'd before
+			# going into the things-to-cat-together-and-MD5.
+			# This lets applications that store AIM passwords
+			# store the MD5'd password.  We do it by default
+			# because, well, AIM for Windows does.  We support
+			# the old way to preserve compatibility with
+			# our auth_challenge/auth_response API.
 
-		if($session->{svcdata}->{betainfo}) {
-			$tlv->{0x4C} = $session->{svcinfo}->{betainfo};
+			$protodata{pass_is_hashed} = "";
+			my $hashpass = $session->{pass_is_hashed} ? $password : md5($password);
+
+			$protodata{auth_response} = encode_password($session, $hashpass, $key);
 		}
 	}
 
-	return $tlv;
+	return %protodata;
 }
 
 sub encode_password($$;$) {
@@ -219,6 +236,38 @@ sub encode_password($$;$) {
 		}
 
 		return $ret;
+	}
+}
+
+sub send_versions($$) {
+	my($connection, $send_tools) = @_;
+	my $conntype = $connection->{conntype};
+	my @services;
+
+	if($conntype != CONNTYPE_BOS) {
+		@services = (1, $conntype);
+	} else {
+		@services = sort {$b <=> $a} grep {not OSCAR_TOOLDATA()->{$_}->{nobos}} keys %{OSCAR_TOOLDATA()};
+	}
+
+	my %protodata = (service => []);
+	foreach my $service (@services) {
+		my %service = (
+			service_id => $service,
+			service_version => OSCAR_TOOLDATA->{$service}->{version}
+		);
+		if($send_tools) {
+			$service{tool_id} = OSCAR_TOOLDATA->{$service}->{toolid};
+			$service{tool_version} = OSCAR_TOOLDATA->{$service}->{toolversion};
+		}
+
+		push @{$protodata{service}}, \%service;
+	}
+
+	if($send_tools) {
+		$connection->proto_send(protobit => "set tool versions", protodata => \%protodata);
+	} else {
+		$connection->proto_send(protobit => "set service versions", protodata => \%protodata);
 	}
 }
 

@@ -4,12 +4,11 @@ use ExtUtils::MakeMaker;
 WriteMakefile
   (
    NAME        => 'Net::OSCAR',
-   VERSION     => '1.11',
+   VERSION     => '1.905',
    PL_FILES    => {},
    INSTALLDIRS => 'site',
    PREREQ_PM   => {
 		 'Scalar::Util' => '>= 1.0',
-		 'Filter::Util::Call' => '>= 1.0',
 		 'Digest::MD5' => '>= 2.0',
 		  },
   );

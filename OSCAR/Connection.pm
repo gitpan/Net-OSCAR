@@ -6,8 +6,8 @@ Net::OSCAR::Connection -- individual Net::OSCAR service connection
 
 package Net::OSCAR::Connection;
 
-$VERSION = '1.11';
-$REVISION = '$Revision: 1.65.4.10 $';
+$VERSION = '1.905';
+$REVISION = '$Revision: 1.75.2.8 $';
 
 use strict;
 use vars qw($VERSION);
@@ -17,13 +17,14 @@ use Symbol;
 use Digest::MD5;
 use Fcntl;
 use POSIX qw(:errno_h);
+use Scalar::Util qw(weaken);
 
 use Net::OSCAR::Common qw(:all);
 use Net::OSCAR::Constants;
 use Net::OSCAR::Utility;
 use Net::OSCAR::TLV;
 use Net::OSCAR::Callbacks;
-use Net::OSCAR::OldPerl;
+use Net::OSCAR::XML;
 
 if($^O eq "MSWin32") {
 	eval '*F_GETFL = sub {0};';
@@ -35,23 +36,50 @@ sub new($@) {
 	my($class, %data) = @_;
 	$class = ref($class) || $class || "Net::OSCAR::Connection";
 	my $self = { %data };
+
+	# Avoid circular references
+	weaken($self->{session});
+
 	bless $self, $class;
 	$self->{seqno} = 0;
+	$self->{icq_seqno} = 0;
 	$self->{paused} = 0;
 	$self->{outbuff} = "";
 	$self->{state} ||= "write";
-	$self->connect($self->{peer}) if $self->{peer};
+
+	$self->connect($self->{peer}) if exists($self->{peer});
 
 	return $self;
 }
 
+sub proto_send($%) {
+	my($self, %data) = @_;
+	$data{protodata} ||= {};
+
+	my %snac = protobit_to_snac($data{protobit}); # or croak "Couldn't find protobit $data{protobit}";
+	confess "BAD SELF!" unless ref($self);
+	confess "BAD DATA!" unless ref($data{protodata});
+
+	$snac{data} = protoparse($self->{session}, $data{protobit})->pack(%{$data{protodata}});
+	foreach (qw(reqdata reqid flags1 flags2)) {
+		$snac{$_} = $data{$_} if exists($data{$_});
+	}
+
+	if(exists($snac{family})) {
+		$self->log_printf(OSCAR_DBG_DEBUG, "Put SNAC 0x%04X/0x%04X: %s", $snac{family}, $snac{subtype}, $data{protobit});
+		$self->snac_put(%snac);
+	} else {
+		$snac{channel} ||= 0+FLAP_CHAN_SNAC;
+		$self->log_printf(OSCAR_DBG_DEBUG, "Putting raw FLAP: %s", $data{protobit});
+		$self->flap_put($snac{data}, $snac{channel});
+	}
+}
+
+
+
 sub fileno($) {
 	my $self = shift;
-	if(!$self->{socket}) {
-		$self->{sockerr} = 1;
-		$self->disconnect();
-		return undef;
-	}
+	return undef unless $self->{socket};
 	return fileno $self->{socket};
 }
 
@@ -59,21 +87,19 @@ sub flap_encode($$;$) {
 	my ($self, $msg, $channel) = @_;
 
 	$channel ||= FLAP_CHAN_SNAC;
-	return pack("CCnna*", 0x2A, $channel, ++$self->{seqno}, length($msg), $msg);
+	return protoparse($self->{session}, "flap")->pack(
+		channel => $channel,
+		seqno => ++$self->{seqno},
+		msg => $msg
+	);
 }
 
-sub flap_put($;$$) {
-	my($self, $msg, $channel) = @_;
-	my $emsg;
-	my $had_outbuff = 0;
+sub write($$) {
+	my($self, $data) = @_;
 
-	return unless $self->{socket} and CORE::fileno($self->{socket}) and getpeername($self->{socket}); # and !$self->{socket}->error;
+	my $had_outbuff = 1 if $self->{outbuff};
+	$self->{outbuff} .= $data;
 
-	$had_outbuff = 1 if $self->{outbuff};
-	if($msg) {
-		$emsg = $self->flap_encode($msg, $channel);
-		$self->{outbuff} .= $emsg;
-	}
 	my $nchars = syswrite($self->{socket}, $self->{outbuff}, length($self->{outbuff}));
 	if(!defined($nchars)) {
 		return "" if $! == EAGAIN;
@@ -81,17 +107,66 @@ sub flap_put($;$$) {
 		$self->{sockerr} = 1;
 		$self->disconnect();
 		return undef;
+	}
+
+	my $wrote = substr($self->{outbuff}, 0, $nchars, "");
+
+	if($self->{outbuff}) {
+		$self->log_print(OSCAR_DBG_NOTICE, "Couldn't do complete write - had to buffer ", length($self->{outbuff}), " bytes.");
+		$self->{state} = "readwrite";
+		$self->{session}->callback_connection_changed($self, "readwrite");
+		return 0;
+	} elsif($had_outbuff) {
+		$self->{state} = "read";
+		$self->{session}->callback_connection_changed($self, "read");
+		return 1;
+	}
+	$self->log_print_cond(OSCAR_DBG_PACKETS, sub { "Put '", hexdump($wrote), "'" });
+
+	return 1;
+}
+
+sub flap_put($;$$) {
+	my($self, $msg, $channel) = @_;
+	my $had_outbuff = 0;
+
+	$channel ||= FLAP_CHAN_SNAC;
+
+	return unless $self->{socket} and CORE::fileno($self->{socket}) and getpeername($self->{socket}); # and !$self->{socket}->error;
+
+	$msg = $self->flap_encode($msg, $channel) if $msg;
+	$self->write($msg);
+}
+
+sub read($$) {
+	my($self, $len) = @_;
+
+	$self->{buffsize} ||= $len;
+	$self->{buffer} ||= "";
+
+	my $buffer = "";
+	my $nchars = sysread($self->{socket}, $buffer, $self->{buffsize} - length($self->{buffer}));
+	if(!defined($nchars)) {
+		return "" if $! == EAGAIN;
+		$self->log_print(OSCAR_DBG_NOTICE, "Couldn't read from socket: $!");
+		$self->{sockerr} = 1;
+		$self->disconnect();
+		return undef;
+	} elsif($nchars == 0) { # EOF
+		$self->log_print(OSCAR_DBG_NOTICE, "Got EOF on socket");
+		$self->{sockerr} = 1;
+		$self->disconnect();
+		return undef;
 	} else {
-		$emsg = substr($self->{outbuff}, 0, $nchars, "");
-		if($self->{outbuff}) {
-			$self->log_print(OSCAR_DBG_NOTICE, "Couldn't do complete write - had to buffer ", length($self->{outbuff}), " bytes.");
-			$self->{state} = "readwrite";
-			$self->{session}->callback_connection_changed($self, "readwrite");
-		} elsif($had_outbuff) {
-			$self->{state} = "read";
-			$self->{session}->callback_connection_changed($self, "read");
-		}
-		$self->log_print(OSCAR_DBG_PACKETS, "Put ", hexdump($emsg));
+		$self->log_print_cond(OSCAR_DBG_PACKETS, sub { "Got '", hexdump($buffer), "'" });
+		$self->{buffer} .= $buffer;
+	}
+
+	if(length($self->{buffer}) < $self->{buffsize}) {
+		return "";
+	} else {
+		delete $self->{buffsize};
+		return delete $self->{buffer};
 	}
 }
 
@@ -101,54 +176,20 @@ sub flap_get($) {
 	my ($buffer, $channel, $len);
 	my $nchars;
 
-	if(!exists($self->{buff_gotflap})) {
-		$self->{buffsize} ||= 6;
-		$self->{buffer} ||= "";
+	if(!$self->{buff_gotflap}) {
+		my $header = $self->read(6);
+		return $header unless $header;
 
-		$nchars = sysread($self->{socket}, $buffer, $self->{buffsize} - length($self->{buffer}));
-		if(!defined($nchars)) {
-			return "" if $! == EAGAIN;
-			$self->log_print(OSCAR_DBG_NOTICE, "Couldn't read from socket: $!");
-			$self->{sockerr} = 1;
-			$self->disconnect();
-			return undef;
-		} else {
-			$self->{buffer} .= $buffer;
-		}
-
-		if(length($self->{buffer}) == 6) {
-			$self->{buff_gotflap} = 1;
-			($buffer) = delete $self->{buffer};
-			(undef, $self->{channel}, undef, $self->{buffsize}) = unpack("CCnn", $buffer);
-			$self->{buffer} = "";
-		} else {
-			return "";
-		}
+		$self->{buff_gotflap} = 1;
+		(undef, $self->{channel}, undef, $self->{buffsize}) = unpack("CCnn", $header);
 	}
 
-	$nchars = sysread($self->{socket}, $buffer, $self->{buffsize} - length($self->{buffer}));
-	if(!defined($nchars)) {
-		return "" if $! == EAGAIN;
-		$self->log_print(OSCAR_DBG_NOTICE, "Couldn't read from socket: $!");
-		$self->{sockerr} = 1;
-		$self->disconnect();
-		return undef;
-	} else {
-		$self->{buffer} .= $buffer;
-	}
+	my $data = $self->read($self->{buffsize});
+	return $data unless $data;
 
-	if(length($self->{buffer}) == $self->{buffsize}) {
-		$self->log_print(OSCAR_DBG_PACKETS, "Got ", hexdump($self->{buffer}));
-		$buffer = $self->{buffer};
-
-		delete $self->{buffer};
-		delete $self->{buff_gotflap};
-		delete $self->{buffsize};
-
-		return $buffer;
-	} else {
-		return "";
-	}
+	$self->log_print_cond(OSCAR_DBG_PACKETS, sub { "Got ", hexdump($self->{buffer}) });
+	delete $self->{buff_gotflap};
+	return $data;
 }
 
 sub snac_encode($%) {
@@ -163,12 +204,14 @@ sub snac_encode($%) {
 	$snac{reqid} ||= ($snac{subtype}<<16) | (unpack("n", randchars(2)))[0];
 	$self->{reqdata}->[$snac{family}]->{pack("N", $snac{reqid})} = $snac{reqdata} if $snac{reqdata};
 
-	return pack("nnCCNa*", $snac{family}, $snac{subtype}, $snac{flags1}, $snac{flags2}, $snac{reqid}, $snac{data});
+	my $snac = protoparse($self->{session}, "snac")->pack(%snac);
+	return $snac;
 }
 
 sub snac_put($%) {
 	my($self, %snac) = @_;
-	$snac{channel} ||= FLAP_CHAN_SNAC;
+	$snac{channel} ||= 0+FLAP_CHAN_SNAC;
+	confess "No family/subtype" unless exists($snac{family}) and exists($snac{subtype});
 	$self->flap_put($self->snac_encode(%snac), $snac{channel});
 }
 
@@ -180,22 +223,15 @@ sub snac_get($) {
 
 sub snac_decode($$) {
 	my($self, $snac) = @_;
-	my($family, $subtype, $flags1, $flags2, $reqid, $data) = (unpack("nnCCNa*", $snac));
+	my(%data) = protoparse($self->{session}, "snac")->unpack($snac);
 
-	if($flags1 & 0x80) {
-		my($minihdr_len) = unpack("n", $data);
+	if($data{flags1} & 0x80) {
+		my($minihdr_len) = unpack("n", $data{data});
 		$self->log_print(OSCAR_DBG_DEBUG, "Got miniheader of length $minihdr_len");
-		substr($data, 0, 2+$minihdr_len) = "";
+		substr($data{data}, 0, 2+$minihdr_len) = "";
 	}
 
-	return {
-		family => $family,
-		subtype => $subtype,
-		flags1 => $flags1,
-		flags2 => $flags2,
-		reqid => $reqid,
-		data => $data
-	};
+	return \%data;
 }
 
 sub snac_dump($$) {
@@ -227,7 +263,7 @@ sub set_blocking($$) {
 		ioctl($self->{socket},
 			0x80000000 | (4 << 16) | (ord('f') << 8) | 126,
 			$blocking
-		) or croak "Couldn't set Win32 blocking: $!";
+		) or warn "Couldn't set Win32 blocking: $!\n";
 	}
 
 	return $self->{socket};
@@ -353,22 +389,21 @@ sub process_one($;$$$) {
 			$self->log_print(OSCAR_DBG_SIGNON, "Connected to login server.");
 			$self->{ready} = 1;
 
-			$self->log_print(OSCAR_DBG_SIGNON, "Sending screenname.");
 			if(!$self->{session}->{svcdata}->{hashlogin}) {
-				$self->flap_put(tlv_encode(tlv(
-					0x17 => pack("C6", 0, 0, 0, 0, 0, 0),
-					0x01 => $self->{session}->{screenname}
-				)));
+				$self->proto_send(protobit => "initial signon request",
+					protodata => {screenname => $self->{session}->{screenname}}
+				);
 			} else {
-				$self->flap_put(pack("N", 1) . tlv_encode(signon_tlv($self->{session}, $self->{auth})), FLAP_CHAN_NEWCONN);
+				$self->proto_send(protobit => "ICQ signon request",
+					protodata => {signon_tlv($self->{session}, $self->{auth})}
+				);
 			}
 		} else {
 			$self->log_print(OSCAR_DBG_NOTICE, "Sending BOS-Signon.");
-			$self->snac_put(family => 0, subtype => 1,
-				flags2 => 0x6,
+			$self->proto_send(protobit => "BOS signon",
 				reqid => 0x01000000 | (unpack("n", substr($self->{auth}, 0, 2)))[0],
-				data => substr($self->{auth}, 2),
-				channel => FLAP_CHAN_NEWCONN);
+				protodata => {cookie => substr($self->{auth}, 2)}
+			)
 		}
 		$self->log_print(OSCAR_DBG_DEBUG, "SNAC time.");
 		return $self->{ready} = 1;
@@ -388,7 +423,12 @@ sub process_one($;$$$) {
 				$self->{reqdata}->[0x17]->{pack("N", 0)} = "";
 				return Net::OSCAR::Callbacks::process_snac($self, $snac);
 			} else {
-				return Net::OSCAR::Callbacks::process_snac($self, $self->snac_decode($data));
+				my $snac = $self->snac_decode($data);
+				if($snac) {
+					return Net::OSCAR::Callbacks::process_snac($self, $snac);
+				} else {
+					return 0;
+				}
 			}
 		}
 	}
@@ -398,18 +438,7 @@ sub ready($) {
 	my($self) = shift;
 
 	return if $self->{sentready}++;
-	$self->log_print(OSCAR_DBG_DEBUG, "Sending client ready.");
-	my $conntype = $self->{conntype};
-	if($conntype != CONNTYPE_BOS) {
-		$self->snac_put(family => 0x1, subtype => 0x2, data => pack("n*",
-			1, OSCAR_TOOLDATA()->{1}->{version}, OSCAR_TOOLDATA()->{1}->{toolid}, OSCAR_TOOLDATA()->{1}->{toolversion},
-			$conntype, OSCAR_TOOLDATA()->{$conntype}->{version}, OSCAR_TOOLDATA()->{$conntype}->{toolid}, OSCAR_TOOLDATA()->{$conntype}->{toolversion}
-		));
-	} else {
-		my $data = "";
-		$data .= pack("n*", $_, OSCAR_TOOLDATA()->{$_}->{version}, OSCAR_TOOLDATA()->{$_}->{toolid}, OSCAR_TOOLDATA()->{$_}->{toolversion}) foreach sort {$b <=> $a} grep {not OSCAR_TOOLDATA()->{$_}->{nobos}} keys %{OSCAR_TOOLDATA()};
-		$self->snac_put(family => 0x1, subtype => 0x2, data => $data);
-	}
+	send_versions($self, 1);
 }
 
 sub session($) { return shift->{session}; }

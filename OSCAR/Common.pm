@@ -6,8 +6,8 @@ Net::OSCAR::Common -- Net::OSCAR public constants
 
 package Net::OSCAR::Common;
 
-$VERSION = '1.11';
-$REVISION = '$Revision: 1.58.6.9 $';
+$VERSION = '1.905';
+$REVISION = '$Revision: 1.62.2.6 $';
 
 use strict;
 use vars qw(@ISA @EXPORT_OK %EXPORT_TAGS $VERSION);
@@ -22,12 +22,15 @@ require Exporter;
 		ADMIN_TYPE_SCREENNAME_FORMAT
 		ADMIN_TYPE_ACCOUNT_CONFIRM
 		ADMIN_ERROR_UNKNOWN
+		ADMIN_ERROR_DIFFSN
 		ADMIN_ERROR_BADPASS
 		ADMIN_ERROR_BADINPUT
 		ADMIN_ERROR_BADLENGTH
 		ADMIN_ERROR_TRYLATER
 		ADMIN_ERROR_REQPENDING
 		ADMIN_ERROR_CONNREF
+		ADMIN_ERROR_EMAILLIM
+		ADMIN_ERROR_EMAILBAD
 		VISMODE_PERMITALL
 		VISMODE_DENYALL
 		VISMODE_PERMITSOME
@@ -56,6 +59,8 @@ require Exporter;
 		OSCAR_DBG_NOTICE
 		OSCAR_DBG_DEBUG
 		OSCAR_DBG_PACKETS
+		OSCAR_DBG_XML
+		OSCAR_DBG_XML2
 	)]
 );
 $EXPORT_TAGS{all} = [@{$EXPORT_TAGS{standard}}, @{$EXPORT_TAGS{loglevels}}];
@@ -69,6 +74,8 @@ use constant OSCAR_DBG_SIGNON => 3;
 use constant OSCAR_DBG_NOTICE => 4;
 use constant OSCAR_DBG_DEBUG => 6;
 use constant OSCAR_DBG_PACKETS => 10;
+use constant OSCAR_DBG_XML => 30;
+use constant OSCAR_DBG_XML2 => 35;
 
 # Typing statuses
 use constant TYPINGSTATUS_STARTED => dualvar(2, "typing started");
@@ -89,6 +96,9 @@ use constant ADMIN_ERROR_BADLENGTH => dualvar(3, "screenname/email/password is t
 use constant ADMIN_ERROR_TRYLATER => dualvar(4, "request could not be processed; wait a few minutes and try again");
 use constant ADMIN_ERROR_REQPENDING => dualvar(5, "request pending");
 use constant ADMIN_ERROR_CONNREF => dualvar(6, "couldn't connect to the admin server");
+use constant ADMIN_ERROR_DIFFSN => dualvar(7, "the new screenname is not equivalent to the old screenname");
+use constant ADMIN_ERROR_EMAILLIM => dualvar(8, "the email address has too many screennames");
+use constant ADMIN_ERROR_EMAILBAD => dualvar(9, "the email address is invalid");
 
 # Direct connect types
 use constant OSCAR_DIRECT_IM => dualvar(1, "direct IM");
@@ -118,11 +128,11 @@ use constant OSCAR_SVC_AIM => (
 	port => 5190,
 	supermajor => 0x0109,
 	major => 5,
-	minor => 2,
+	minor => 5,
 	subminor => 0,
-	build => 3292,
-	subbuild => 0xEE,
-	clistr => "AOL Instant Messenger, version 5.2.3292/WIN32",
+	build => 0x0E0B,
+	subbuild => 0x00000104,
+	clistr => "AOL Instant Messenger, version 5.5.3595/WIN32",
 	hashlogin => 0,
 	betainfo => "",
 );

@@ -14,14 +14,13 @@ will be true.
 
 package Net::OSCAR::Screenname;
 
-$VERSION = '1.11';
-$REVISION = '$Revision: 1.20.6.9 $';
+$VERSION = '1.905';
+$REVISION = '$Revision: 1.21.2.6 $';
 
 use strict;
 use vars qw($VERSION);
 
 use Net::OSCAR::Utility qw(normalize);
-use Net::OSCAR::OldPerl;
 
 use overload
 	"cmp" => "compare",
