@@ -1,10 +1,14 @@
 package Net::OSCAR::Connection;
 
-$VERSION = 0.05;
+$VERSION = 0.06;
 
 use strict;
 use vars qw($VERSION);
-use warnings;
+if($[ > 5.005) {
+	require warnings;
+} else {
+	$^W = 1;  
+}
 use Carp;
 use Socket;
 use Symbol;
@@ -82,13 +86,11 @@ sub flap_get($) {
 		$self->disconnect();
 		return undef;
 	}
-	print STDERR "Wanted $len but got $nchars!!\n" unless $len == $nchars;
 	if($len > $nchars) {
 		my $abuff = "";
 		$len -= $nchars;
 		$nchars = sysread($self->{socket}, $abuff, $len);
 		$buffer .= $abuff;
-		print STDERR "Got $nchars more chars.\n";
 	}
 		
 	return $buffer;
@@ -219,16 +221,19 @@ sub connect($$) {
 
 	tie %tlv, "Net::OSCAR::TLV";
 
-	confess "Empty host!" unless $host;
+	croak "Empty host!" unless $host;
 	$host =~ s/:(.+)//;
 	if(!$1) {
-		if(exists($self->{session}) and $self->{session}->{port}) {
+		if(exists($self->{session})) {
 			$port = $self->{session}->{port};
 		} else {
-			$port = 5190;
+			croak "No port!";
 		}
 	} else {
 		$port = $1;
+		if($port =~ /^[^0-9]/) {
+			$port = $self->{session}->{port};
+		}
 	}
 	$self->{host} = $host;
 	$self->{port} = $port;

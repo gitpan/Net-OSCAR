@@ -1,10 +1,14 @@
 package Net::OSCAR::Callbacks;
 
-$VERSION = 0.05;
+$VERSION = 0.06;
 
 use strict;
 use vars qw($VERSION);
-use warnings;
+if($[ > 5.005) {
+	require warnings;
+} else {
+	$^W = 1;  
+}
 use Carp;
 
 use Net::OSCAR::Common qw(:all);
@@ -67,18 +71,18 @@ sub process_snac($$) {
 			$session->crapout($connection, "Invalid password.") if $error == 0x05;
 			$session->crapout($connection, "You've been connecting too frequently.") if $error == 0x18;
 			$session->crapout($connection, "Unknown error $error: $tlv{0x04}.");
+		} else {
+			$connection->debug_print("Login OK - connecting to BOS");
+			$connection->disconnect;
+			$session->{screenname} = $tlv{0x01};
+			$session->{email} = $tlv{0x11};
+			$session->addconn(
+				$tlv{0x6},
+				CONNTYPE_BOS,
+				"BOS",
+				$tlv{0x05}
+			);
 		}
-
-		$connection->debug_print("Login OK - connecting to BOS");
-		$connection->disconnect;
-		$session->{screenname} = $tlv{0x01};
-		$session->{email} = $tlv{0x11};
-		$session->addconn(
-			$tlv{0x6},
-			CONNTYPE_BOS,
-			"BOS",
-			$tlv{0x05}
-		);
 
 	} elsif($family == 0x1 and $subtype == 0x7) {
 		$connection->debug_print("Got Rate Info Resp.");
@@ -266,7 +270,7 @@ sub process_snac($$) {
 		$connection->debug_print("Got buddylist.");
 		$connection->snac_put(family => 0x13, subtype => 0x7);
 
-		$session->set_info("Connected via <a href=\"http://www.zevils.com/programs/aimirc/\">aimirc</a> using <a href=\"http://www.zevils.com/programs/aimirc/dormouse.html\">dormouse</a>.");
+		$session->set_info("");
 
 		$connection->debug_print("Setting idle.");
 		$connection->snac_put(family => 0x1, subtype => 0x11, data => pack("N", 0));
@@ -298,74 +302,56 @@ sub process_snac($$) {
 		$session->{visibility} = VISMODE_PERMITALL; # If we don't have p/d data, this is default.
 
 		($flags) = unpack("xn", substr($data, 0, 3, ""));
+		substr($data, 0, 6) = "" if substr($data, 0, 6) eq chr(0)x6;
 
-		while(substr($data, 0, 2) eq chr(0)x2 and length($data) > 4) {
-                        do {
-				substr($data, 0, 2) = "";
-			} while(substr($data, 0, 2) eq chr(0)x2);
+		while(length($data) > 4) {
 			my $type;
-			($type, $tlvlen) = unpack("n n", substr($data, 0, 4, ""));
-			if($type == 1) {
-				substr($data, 0, 2) = ""; #0x00C8
-				($flags, $flags2) = unpack("n n", substr($data, 0, 4, ""));
-				#if($flags2 == 1) {
-					substr($data, 0, $flags - 2) = "" if $flags;
+			while(substr($data, 0, 4) eq chr(0)x4) {
+				substr($data, 0, 4) = "";
+			}
 
-					while(substr($data, 0, 2) ne chr(0)x2 and length($data) > 4) {
-						my $buddy = get_buddy($session, \$data);
-						next unless $buddy;
-						$session->debug_print("Queueing buddy $buddy->{name}.");
-						push @buddyqueue, $buddy;
-					}
-				#} else {
-				#	# Do nothing?
-				#}
+			($type) = unpack("n", substr($data, 0, 2));
+			if($type == 1) {
+				($tlvlen) = unpack("xx n", substr($data, 0, 4, ""));
+				substr($data, 0, $tlvlen) = "";
 			} elsif($type == 2) {
+				substr($data, 0, 4) = ""; #0x0002 0x0004?
 				($tlvlen) = unpack("n", substr($data, 0, 2, ""));
 				$tlv = $connection->tlv_decode(substr($data, 0, $tlvlen, ""));
 				($session->{visibility}) = unpack("C", $tlv->{0xCA});
 				$haspd = $tlv->{0xCB};
+
+				if(substr($data, 0, 4) eq chr(0)x4 and $haspd and $haspd eq chr(0xFF)x4) {
+					substr($data, 0, 8) = "";
+					($tlvlen) = unpack("n", substr($data, 0, 2, ""));
+					substr($data, 0, $tlvlen) = "";
+				}
 			} else {
-				$data = pack("nn", $type, $tlvlen) . $data;
-				last;
-			}
-		}
+				# Test for buddy validity
+				my $addedbyte = 0;
+				if(substr($data, 0, 1) ne chr(0)) {
+					$addedbyte = 1;
+					$data = chr(0) . $data;
+				}
+				my($buddy) = unpack("n/a*", $data);
+				if($buddy =~ /[\x00-\x1F\x7F-\xFF]/) {
+					substr($data, 0, 2+length($buddy)) = "";
+					substr($data, 0, 1) = "" if $addedbyte;
+					next;
+				}
 
-		my $currbud;
-
-		if(substr($data, 0, 4) eq chr(0)x4 and $haspd and $haspd eq chr(0xFF)x4) {
-			$currbud = 0;
-			while(substr($data, 0, 2) ne chr(0)x2) {
-				$currbud++;
-				my $buddy = get_buddy($session, \$data);
+				$buddy = get_buddy($session, \$data);
 				next unless $buddy;
-				$session->debug_print("Queueing buddy $buddy->{name}.");
-				push @buddyqueue, $buddy;
-			}
-			substr($data, 0, 2) = "" if $currbud;
-		}
 
-		### End of permit/deny list.
-
-		#$session->debug_print("blt at end of p/d:", hexdump($data));
-
-		## ???
-		### Now we do the regular buds.
-
-		while(length($data) > 4) {
-			while(substr($data, 0, 2) eq chr(0)x2) {
-				substr($data, 0, 12) = "";
-				($tlvlen) = unpack("n", substr($data, 0, 2, ""));
-				substr($data, 0, $tlvlen) = "";
-			}
-			my $buddy = get_buddy($session, \$data);
-			next unless $buddy;
-			if($buddy->{buddyid}) {
-				$session->debug_print("Queueing buddy $buddy->{name}.");
-				push @buddyqueue, $buddy;
-			} else {
-				my $group = $buddy->{name};
-				$session->debug_printf("Got group $group (0x%04X).", $buddy->{groupid});
+				if($buddy->{buddyid}) {
+					$session->debug_print("Queueing buddy $buddy->{name}.");
+					push @buddyqueue, $buddy;
+				} else {
+					my $group = $buddy->{name};
+					$session->debug_printf("Got group $group (0x%04X).", $buddy->{groupid});
+					$session->{buddies}->{$group}->{groupid} = $buddy->{groupid};
+					$session->{buddies}->{$group}->{members} = $session->bltie();
+				}
 			}
 		}
 
@@ -374,6 +360,7 @@ sub process_snac($$) {
 			my $group = "";
 			if($buddy->{pdflag}) {
 				($buddy->{pdflag} == GROUP_PERMIT) ? ($group = "permit") : ($group = "deny");
+				$session->{$group}->{$buddy->{name}} = { buddyid => $buddy->{buddid} };
 			} else {
 				if(!$buddy->{groupid}) {
 					my $xgroup = (sort grep { $_ ne "permit" and $_ ne "deny" } keys %{$session->{buddies}})[0];
@@ -381,16 +368,17 @@ sub process_snac($$) {
 				}
 				$group = $session->findgroup($buddy->{groupid});
 				#$session->debug_print("After findgroup, groups are: ", join(",", keys %{$session->{buddies}}));
+				next unless $group;
+				next if $session->{buddies}->{$group}->{members}->{$buddy->{name}};
+				$session->{buddies}->{$group}->{members} = $session->bltie() unless exists $session->{buddies}->{$group}->{members};
+				$session->{buddies}->{$group}->{members}->{$buddy->{name}} = {
+					online => 0,
+					buddyid => $buddy->{buddyid}
+				};
 			}
-			next unless $group;
-			$session->{buddies}->{$group}->{members} = $session->bltie() unless exists $session->{buddies}->{$group}->{members};
-			$session->{buddies}->{$group}->{members}->{$buddy->{name}} = {
-				online => 0,
-				buddyid => $buddy->{buddyid}
-			};
 		}
 
-		$session->callback_signon_done();
+		$session->callback_signon_done() unless $session->{sent_done}++;
 	} elsif($family == 0x13 and $subtype == 0x0E) {
 		$connection->debug_print("Got blmod ack.");
 		$session->modgroups();

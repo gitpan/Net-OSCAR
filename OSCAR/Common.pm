@@ -1,9 +1,13 @@
 package Net::OSCAR::Common;
 
-$VERSION = 0.05;
+$VERSION = 0.06;
 
 use strict;
-use warnings;
+if($[ > 5.005) {
+	require warnings;
+} else {
+	$^W = 1;  
+}
 use vars qw(@ISA @EXPORT_OK %EXPORT_TAGS $VERSION);
 use Scalar::Util qw(dualvar);
 require Exporter;
@@ -134,19 +138,35 @@ sub debug_print($@) {
 	my($obj) = (shift);
 	my $session = exists($obj->{session}) ? $obj->{session} : $obj;
 	return unless $session->{DEBUG};
-	print STDERR "(",$session->{screenname},") " if $session->{SNDEBUG};
-	print STDERR $obj->{description}, ": " if $obj->{description};
-	print STDERR join("", @_), "\n";
+
+	my $message = "";
+	$message .= "(".$session->{screenname}.") " if $session->{SNDEBUG};
+	$message .= $obj->{description}. ": " if $obj->{description};
+	$message .= join("", @_). "\n";
+
+	if($session->{callbacks}->{debug_print}) {
+		$session->callback_debug_print($message);
+	} else {
+		print STDERR $message;
+	}
 }
 
 sub debug_printf($@) {
 	my($obj, $fmtstr) = (shift, shift);
 	my $session = exists($obj->{session}) ? $obj->{session} : $obj;
 	return unless $session->{DEBUG};
-	print STDERR "(",$session->{screenname},") " if $session->{SNDEBUG};
-	print STDERR $obj->{description} . ": " if $obj->{description};
-	printf STDERR $fmtstr, @_;
-	print STDERR "\n";
+
+	my $message = "";
+	$message .= "(".$session->{screenname}.") " if $session->{SNDEBUG};
+	$message .= $obj->{description} . ": " if $obj->{description};
+	$message .= sprintf($fmtstr, @_);
+	$message .= "\n";
+
+	if($session->{callbacks}->{debug_print}) {
+		$session->callback_debug_print($message);
+	} else {
+		print STDERR $message;
+	}
 }
 
 sub hexdump($) {
