@@ -1,6 +1,6 @@
 package Net::OSCAR::Callbacks;
 
-$VERSION = 0.07;
+$VERSION = 0.08;
 
 use strict;
 use vars qw($VERSION);
@@ -10,6 +10,7 @@ use Carp;
 use Net::OSCAR::Common qw(:all);
 use Net::OSCAR::TLV;
 use Net::OSCAR::Buddylist;
+use Net::OSCAR::_BLInternal;
 
 use constant MAJOR => 4;
 use constant MINOR => 3;
@@ -27,6 +28,7 @@ sub capabilities() {
 sub process_snac($$) {
 	my($connection, $snac) = @_;
 	my($conntype, $family, $subtype, $data, $reqid) = ($connection->{conntype}, $snac->{family}, $snac->{subtype}, $snac->{data}, $snac->{reqid});
+	my $reqdata = delete $connection->{reqdata}->[$family]->{pack("N", $reqid)};
 	my $session = $connection->{session};
 
 	my %tlv;
@@ -41,11 +43,10 @@ sub process_snac($$) {
 
 		$connection->debug_print("Sending password.");
 
-		# We pretend to be the AIM 3.5.1670/Win32.
 		%tlv = (
 			0x01 => $session->{screenname},
 			0x25 => $connection->encode_password($connection->{auth}, $key),
-			0x03 => "AOL Instant Messenger (SM), version 4.3.2229/WIN32",
+			0x03 => "AOL Instant Messenger (SM), version ".MAJOR.".".MINOR.".".BUILD."/WIN32",
 			0x16 => pack("n", 0x109),
 			0x17 => pack("n", MAJOR),
 			0x18 => pack("n", MINOR),
@@ -56,11 +57,11 @@ sub process_snac($$) {
 			0x0F => "en", # lang
 			0x4A => pack("C", 1),
 		);
-		$connection->snac_put(family => 0x17, subtype => 0x2, data => $connection->tlv_encode(\%tlv));
+		$connection->snac_put(family => 0x17, subtype => 0x2, data => tlv_encode(\%tlv));
 	} elsif($conntype == CONNTYPE_LOGIN and $family == 0x17 and $subtype == 0x3) {
 		$connection->debug_print("Got authorization response.");
 
-		%tlv = %{$connection->tlv_decode($data)};
+		%tlv = %{tlv_decode($data)};
 		if($tlv{0x08}) {
 			my($error) = unpack("n", $tlv{0x08});
 			$session->crapout($connection, "Invalid screenname.") if $error == 0x01;
@@ -137,7 +138,6 @@ sub process_snac($$) {
 		$subtype = $reqid >> 16;
 		my $error = "";
 		$session->debug_printf("Got error on req 0x%04X/0x%08X.", $family, $reqid);
-		my $reqdata = delete $connection->{reqdata}->[$family]->{pack("N", $reqid)};
 		if($family == 0x4) {
 			$error = "Your message to could not be sent for the following reason: ";
 			delete $session->{cookies}->{$reqid};
@@ -145,10 +145,10 @@ sub process_snac($$) {
 			$error = "Error in ".$connection->{description}.": ";
 		}
 		my($errno) = unpack("n", substr($data, 0, 2, ""));
-		my $tlv = $connection->tlv_decode($data) if $data;
+		my $tlv = tlv_decode($data) if $data;
 		$error .= (ERRORS)[$errno] || "unknown error $errno";
 		$error .= "(".$tlv->{4}.")." if $tlv;
-		$session->callback_error($connection, $error, $errno, $tlv->{4}, $reqdata, $family, $subtype);
+		send_error($session, $connection, $errno, (ERRORS)[$errno] || "unknown error $errno", 0, $reqdata);
 	} elsif($family == 0x1 and $subtype == 0xf) {
 		$connection->debug_print("Got user information response.");
 	} elsif($family == 0x9 and $subtype == 0x3) {
@@ -167,7 +167,9 @@ sub process_snac($$) {
 		my $group = $session->findbuddy($screenname);
 		$buddy->{buddyid} = $session->{buddies}->{$group}->{members}->{$screenname}->{buddyid};
 		$buddy->{online} = 1;
-		%{$session->{buddies}->{$group}->{members}->{$screenname}} = %$buddy;
+		foreach my $key(keys %$buddy) {
+			$session->{buddies}->{$group}->{members}->{$screenname}->{$key} = $buddy->{$key};
+		}
 
 		$session->callback_buddy_in($screenname, $group, $buddy);
 	} elsif($family == 0x3 and $subtype == 0xC) {
@@ -177,7 +179,7 @@ sub process_snac($$) {
 		$connection->debug_print("And so, another former ally has abandoned us.  Curse you, $buddy!");
 		$session->callback_buddy_out($buddy, $group);
 	} elsif($family == 0x1 and $subtype == 0x5) {
-		my $tlv = $connection->tlv_decode($data);
+		my $tlv = tlv_decode($data);
 		my($svctype) = unpack("n", $tlv->{0xD});
 		my $conntype;
 		my %chatdata;
@@ -277,108 +279,25 @@ sub process_snac($$) {
 		$connection->snac_put(family => 0x4, subtype => 0x2, data =>
 			pack("n*", 0, 0, 3, 0x1F40, 0x3E7, 0x3E7, 0, 0)
 		);
-
-		#$connection->debug_print("Adding self to buddylist, or something like that.");
-		#$connection->snac_put(family => 0x3, subtype => 0x4, data => pack("Ca*", length($session->{screenname}), $session->{screenname}));
-
-		#$session->debug_print("Requesting chatnav.");
-		#$session->svcreq(CONNTYPE_CHATNAV);
 	} elsif($family == 0x13 and $subtype == 0x6) {
 		$connection->debug_print("Got buddylist 0x0006.");
-		my $tlvlen = 0;
-		my $tlv;
-		my $haspd = 0; # has permit/deny list
-		my($flags, $flags2);
-		my @buddyqueue;
 
-
-		# This stuff was figured out more through sheer perversity
-		# than by actually understanding what all the random bits do.
-
-		$session->{visibility} = VISMODE_PERMITALL; # If we don't have p/d data, this is default.
-
-		($flags) = unpack("xn", substr($data, 0, 3, ""));
-		substr($data, 0, 6) = "" if substr($data, 0, 6) eq chr(0)x6;
-
-		while(length($data) > 4) {
-			my $type;
-			while(substr($data, 0, 4) eq chr(0)x4) {
-				substr($data, 0, 4) = "";
-			}
-
-			($type) = unpack("n", substr($data, 0, 2));
-			if($type == 1) {
-				($tlvlen) = unpack("xx n", substr($data, 0, 4, ""));
-				substr($data, 0, $tlvlen) = "";
-			} elsif($type == 2) {
-				substr($data, 0, 4) = ""; #0x0002 0x0004?
-				($tlvlen) = unpack("n", substr($data, 0, 2, ""));
-				$tlv = $connection->tlv_decode(substr($data, 0, $tlvlen, ""));
-				($session->{visibility}) = unpack("C", $tlv->{0xCA});
-				$haspd = $tlv->{0xCB};
-
-				$session->{haspd} = $haspd;
-				if(substr($data, 0, 4) eq chr(0)x4 and $haspd and $haspd eq chr(0xFF)x4) {
-					substr($data, 0, 8) = "";
-					($tlvlen) = unpack("n", substr($data, 0, 2, ""));
-					substr($data, 0, $tlvlen) = "";
-				}
-			} else {
-				# Test for buddy validity
-				my $addedbyte = 0;
-				if(substr($data, 0, 1) ne chr(0)) {
-					$addedbyte = 1;
-					$data = chr(0) . $data;
-				}
-				my($buddy) = unpack("n/a*", $data);
-				if($buddy =~ /[\x00-\x1F\x7F-\xFF]/) {
-					substr($data, 0, 2+length($buddy)) = "";
-					substr($data, 0, 1) = "" if $addedbyte;
-					next;
-				}
-
-				$buddy = get_buddy($session, \$data);
-				next unless $buddy;
-
-				if($buddy->{buddyid}) {
-					$session->debug_print("Queueing buddy $buddy->{name}.");
-					push @buddyqueue, $buddy;
-				} else {
-					my $group = $buddy->{name};
-					$session->debug_printf("Got group $group (0x%04X).", $buddy->{groupid});
-					$session->{buddies}->{$group}->{groupid} = $buddy->{groupid};
-					$session->{buddies}->{$group}->{members} = $session->bltie();
-				}
-			}
-		}
-
-		$session->debug_print("Processing queued buddies.");
-		foreach my $buddy(@buddyqueue) {
-			my $group = "";
-			if($buddy->{pdflag}) {
-				($buddy->{pdflag} == GROUP_PERMIT) ? ($group = "permit") : ($group = "deny");
-				$session->{$group}->{$buddy->{name}} = { buddyid => $buddy->{buddid} };
-			} else {
-				if(!$buddy->{groupid}) {
-					my $xgroup = (sort grep { $_ ne "permit" and $_ ne "deny" } keys %{$session->{buddies}})[0];
-					$buddy->{groupid} = $session->{buddies}->{$xgroup}->{groupid};
-				}
-				$group = $session->findgroup($buddy->{groupid});
-				#$session->debug_print("After findgroup, groups are: ", join(",", keys %{$session->{buddies}}));
-				next unless $group;
-				next if $session->{buddies}->{$group}->{members}->{$buddy->{name}};
-				$session->{buddies}->{$group}->{members} = $session->bltie() unless exists $session->{buddies}->{$group}->{members};
-				$session->{buddies}->{$group}->{members}->{$buddy->{name}} = {
-					online => 0,
-					buddyid => $buddy->{buddyid}
-				};
-			}
-		}
-
+		return unless Net::OSCAR::_BLInternal::blparse($session, $data);
+		$connection->snac_put(family => 0x13, subtype => 0x7);
 		$session->callback_signon_done() unless $session->{sent_done}++;
 	} elsif($family == 0x13 and $subtype == 0x0E) {
-		$connection->debug_print("Got blmod ack.");
-		$session->modgroups();
+		$session->{budmods}--;
+		$connection->debug_print("Got blmod ack ($session->{budmods} left).");
+		my($error) = unpack("n", $data);
+		if($error != 0) {
+			my($type, $gid, $bid) = ($reqdata->{type}, $reqdata->{gid}, $reqdata->{bid});
+			$session->{blinternal}->{$type}->{$gid}->{$bid} = $session->{blold}->{$type}->{$gid}->{$bid} if exists($session->{blold}->{$type}->{$gid}) and exists($session->{blold}->{$type}->{$gid}->{$bid});
+			Net::OSCAR::_BLInternal::BLI_to_NO($session, $type, $gid, $bid);
+			$session->callback_buddylist_error($error, $reqdata->{desc});
+		} else {
+			$session->callback_buddylist_ok() unless $session->{budmods} > 0;
+		}
+		delete $session->{blold} unless $session->{budmods} > 0;
 	} elsif($family == 0x1 and $subtype == 0x18) {
 		$connection->debug_print("Got hostversions.");
 	} elsif($family == 0x1 and $subtype == 0x1F) {
@@ -440,7 +359,7 @@ sub process_snac($$) {
 		my($detaillevel) = unpack("C", substr($data, 0, 1, ""));
 
 		my($tlvcount) = unpack("n", substr($data, 0, 2, ""));
-		my $tlv = $connection->tlv_decode($data);
+		my $tlv = tlv_decode($data);
 
 		$session->callback_chat_joined($connection->{name}, $connection);
 
@@ -465,16 +384,16 @@ sub process_snac($$) {
 		}
 	} elsif($family == 0x0E and $subtype == 0x06) {
 		substr($data, 0, 10) = "";
-		my $tlv = $connection->tlv_decode($data);
+		my $tlv = tlv_decode($data);
 		my ($sender) = unpack("C/a*", $tlv->{0x03});
-		my $mtlv = $connection->tlv_decode($tlv->{0x05});
+		my $mtlv = tlv_decode($tlv->{0x05});
 		my $message = $mtlv->{0x01};
 		$session->callback_chat_im_in($sender, $connection, $message);
 	} elsif($family == 0x07 and $subtype == 0x05) {
 		$connection->debug_print("Admin request successful!");
 
 		my($reqtype) = unpack("n", substr($data, 0, 2, ""));
-		my $tlv = $connection->tlv_decode(substr($data, 0, 6, ""));
+		my $tlv = tlv_decode(substr($data, 0, 6, ""));
 		my $reqdesc = "";
 		my($subreq) = unpack("n", $tlv->{0x3}) if $tlv->{0x3};
 		$subreq ||= 0;
@@ -494,7 +413,7 @@ sub process_snac($$) {
 
 		my $errdesc = "";
 		if(!exists($tlv->{1})) {
-			my $tlv = $connection->tlv_decode($data);
+			my $tlv = tlv_decode($data);
 			if($reqdesc eq "account confirm") {
 				$errdesc = "Your account is already confirmed.";
 			} else {

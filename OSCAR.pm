@@ -1,6 +1,6 @@
 package Net::OSCAR;
 
-$VERSION = 0.07;
+$VERSION = 0.08;
 
 =head1 NAME
 
@@ -29,7 +29,7 @@ See C<perlmodinstall> for details.
 
 =head1 DEPENDENCIES
 
-This modules requies C<Digest::MD5> and C<Scalar::Util>.
+This modules requires C<Digest::MD5> and C<Scalar::Util>.
 
 =head1 ABSTRACT
 
@@ -129,7 +129,9 @@ use Net::OSCAR::Connection;
 use Net::OSCAR::Callbacks;
 use Net::OSCAR::TLV;
 use Net::OSCAR::Buddylist;
+use Net::OSCAR::Screenname;
 use Net::OSCAR::Chat;
+use Net::OSCAR::_BLInternal;
 
 use warnings;
 require Exporter;
@@ -155,9 +157,6 @@ sub new($) {
 	$self->{description} = "OSCAR session";
 
 	$self->{timeout} = 0.01;
-
-	$self->{permit} = $self->bltie();
-	$self->{deny} = $self->bltie();
 
 	return $self;
 }
@@ -190,7 +189,7 @@ The default is login.oscar.aol.com port 5190.
 
 sub signon($$$;$$) {
 	my($self, $screenname, $password, $host, $port) = @_;
-	$self->{screenname} = $screenname;
+	$self->{screenname} = new Net::OSCAR::Screenname $screenname;
 
 	# We set BOS to the login connection so that our error handlers pick up errors on this connection as fatal.
 	$host ||= "login.oscar.aol.com";
@@ -413,6 +412,15 @@ sub findbuddy($$) {
 	return undef;
 }
 
+sub findbuddy_byid($$$) {
+	my($self, $buddies, $bid) = @_;
+
+	while(my($buddy, $value) = each(%$buddies)) {
+		return $buddy if $value->{buddyid} == $bid;
+	}
+	return undef;
+}
+
 sub newid($;$) {
 	my($self, $group) = @_;
 	my $id = 0;
@@ -427,10 +435,33 @@ sub newid($;$) {
 
 =pod
 
+=item commit_buddylist
+
+Sends your modified buddylist to the OSCAR server.  Changes to the buddylist
+won't actually take effect until this method is called.  Methods that change
+the buddylist have a warning about needing to call this method in their
+documentation.
+
+=item rollback_buddylist
+
+Revert changes you've made to the buddylist, assuming you haven't called
+L<"commit_buddylist"> since making them.
+
+=item reorder_groups GROUPS
+
+Changes the ordering of the groups in your buddylist.  Call L<"commit_buddylist"> to
+save the
+new order on the OSCAR server.
+
+=item reorder_buddies GROUP BUDDIES
+
+Changes the ordering of the buddies in a group on your buddylist.
+Call L<"commit_buddylist"> to save the new order on the OSCAR server.
+
 =item add_permit (BUDDIES)
 
-Add buddies to your permit list.  Note that this is the same as
-calling L<add_buddy> with a group of C<permit>.
+Add buddies to your permit list.  Call L<"commit_buddylist"> for the
+change to take effect.
 
 =item add_deny (BUDDIES)
 
@@ -454,6 +485,21 @@ Returns a list of all members of the deny list.
 
 =cut
 
+sub commit_buddylist($) { Net::OSCAR::_BLInternal::NO_to_BLI(shift); }
+
+sub reorder_groups($@) {
+	my $self = shift;
+	my @groups = @_;
+	tied(%{$self->{buddies}})->setorder(@groups);
+}
+
+sub reorder_buddies($$@) {
+	my $self = shift;
+	my $group = shift;
+	my @buddies = @_;
+	tied(%{$self->{buddies}->{$group}->{members}})->setorder(@buddies);
+}
+
 sub add_permit($@) { shift->mod_permit(MODBL_ACTION_ADD, "permit", @_); }
 sub add_deny($@) { shift->mod_permit(MODBL_ACTION_ADD, "deny", @_); }
 sub remove_permit($@) { shift->mod_permit(MODBL_ACTION_DEL, "permit", @_); }
@@ -465,7 +511,8 @@ sub get_denylist(@) { return keys %{shift->{deny}}; }
 
 =item add_buddy (GROUP, BUDDIES)
 
-Adds buddies to the given group on your buddylist.
+Adds buddies to the given group on your buddylist.  Call L<"commit_buddylist">
+for the change to take effect.
 
 =item remove_buddy (GROUP, BUDDIES)
 
@@ -529,39 +576,108 @@ send them messages.  You can talk to them if you are in the same
 chatroom, although neither of you can invite the other one into
 a chatroom.
 
+Call L<"commit_buddylist"> for the change to take effect.
+
 =cut
 
 sub set_visibility($$) {
 	my($self, $vismode) = @_;
 
 	$self->{vismode} = $vismode;
-	if(!$self->{haspd}) { # Contents of subTLV 0xCB in TLV 0x02 in SNAC 0x0013/0x0006
-		$self->{bos}->snac_put(family => 0x13, subtype => 0x08, data => chr(0xFF)x4);
-		$self->{haspd} = chr(0xFF) x 4;
+}
+
+=pod
+
+=item set_group_permissions NEWPERMS
+
+Set group permissions.  This lets you block any OSCAR users or any AOL users.
+C<NEWPERMS> should be a list of zero or more of the following constants:
+
+=over 4
+
+=item GROUPPERM_OSCAR
+
+Permit AOL Instant Messenger users to contact you.
+
+=item GROUPPERM_AOL
+
+Permit AOL subscribers to contact you.
+
+=back
+
+Call L<"commit_buddylist"> for the change to take effect.
+
+=cut
+
+sub set_group_permissions($@) {
+	my($self, @perms) = @_;
+	my $perms = 0xFFFFFF00;
+
+	foreach my $perm (@perms) { $perms |= $perm; }
+	$self->{groupperms} = $perms;
+}
+
+=pod
+
+=item group_permissions
+
+Returns current group permissions.  The return value is a list like the one
+that L<"set_group_permissions"> wants.
+
+=cut
+
+sub group_permissions($) {
+	my $self = shift;
+	my @retval = ();
+
+	foreach my $perm (GROUPPERM_OSCAR, GROUPPERM_AOL) {
+		push @retval, $perm if $self->{groupperms} & $perm;
 	}
-	$self->{bos}->snac_put(family => 0x13, subtype => 0x9, data =>
-		pack("nnnn nnn Cnn a*", 0, 0, 2, 4, 
-					0xD, 0xCA, 1,
-					$vismode, 0xCB, length($self->{haspd}),
-					$self->{haspd})
-	);
+	return @retval;
+}
+
+=pod
+
+=item profile
+
+Returns your current profile.
+
+=cut
+
+sub profile($) { return shift->{profile}; }
+
+=pod
+
+=item get_app_data [GROUP[, BUDDY]]
+
+Gets application-specific data.  Returns a hashref whose keys are app-data IDs.
+IDs with high-order byte 0x0001 are reserved for non-application-specific usage
+and must be registered with the C<libfaim-aim-protocol@lists.sourceforge.net> list.
+If you wish to set application-specific data, you should reserve a high-order
+byte for your application by emailing C<libfaim-aim-protocol@lists.sourceforge.net>.
+This data is stored in your server-side buddylist and so will be persistent,
+even across machines.
+
+If C<GROUP> is present, a hashref for accessing data specific to that group
+is returned.
+
+If C<BUDDY> is present, a hashref for accessing data specific to that buddy
+is returned.
+
+Call L<"commit_buddylist"> to have the new data saved on the OSCAR server.
+
+=cut
+
+sub get_app_data($;$$) {
+	my($self, $group, $buddy) = @_;
+
+	return $self->{appdata} unless $group;
+	return $self->{buddies}->{$group}->{data} unless $buddy;
+	return $self->{buddies}->{$group}->{members}->{$buddy}->{data};
 }
 
 sub mod_permit($$$@) {
 	my($self, $action, $group, @buddies) = @_;
-	my $groupid;
-	my @ids;
-	my $subtype;
-	my $packet = "";
-
-	$subtype = 0x8 if $action == MODBL_ACTION_ADD;
-	$subtype = 0xA if $action == MODBL_ACTION_DEL;
-
-	if($group eq "permit") {
-		$groupid = GROUP_PERMIT;
-	} else {
-		$groupid = GROUP_DENY;
-	}
 
 	if($action == MODBL_ACTION_ADD) {
 		foreach my $buddy(@buddies) {
@@ -569,141 +685,47 @@ sub mod_permit($$$@) {
 		}
 	} else {
 		foreach my $buddy(@buddies) {
-			push @ids, $self->{$group}->{$buddy}->{buddyid};
 			delete $self->{$group}->{$buddy};
 		}
 	}
-
-	foreach my $buddy(@buddies) {
-		my $id;
-		if($action == MODBL_ACTION_DEL) {
-			$id = shift @ids;
-		} else {
-			$id = $self->{$group}->{$buddy}->{buddyid};
-		}
-		$packet = pack("na*", length($buddy), $buddy);
-		$packet .= pack("nnnn", 0, $id, $groupid, 0);
-	}
-	$self->{bos}->snac_put(family => 0x13, subtype => $subtype, data => $packet);
-	return;
 }
 
 sub mod_buddylist($$$$;@) {
 	my($self, $action, $what, $group, @buddies) = @_;
-	my $packet = "";
-	my $buddy;
-	my $groupid = 0;
-	my $subtype;
-	my @ids;
-
-	$subtype = 0x8 if $action == MODBL_ACTION_ADD;
-	$subtype = 0xA if $action == MODBL_ACTION_DEL;
 
 	@buddies = ($group) if $what == MODBL_WHAT_GROUP;
 
 	if($what == MODBL_WHAT_GROUP and $action == MODBL_ACTION_ADD) {
 		return if exists $self->{buddies}->{$group};
-		$self->{buddies}->{$group}->{groupid} = $groupid = $self->newid();
-		$self->{buddies}->{$group}->{members} = $self->bltie();
+		$self->{buddies}->{$group} = {
+			groupid => $self->newid(),
+			members => bltie,
+			data => tlvtie
+		};
 	} elsif($what == MODBL_WHAT_GROUP and $action == MODBL_ACTION_DEL) {
 		return unless exists $self->{buddies}->{$group};
-		$groupid = $self->{buddies}->{$group}->{groupid};
 		delete $self->{buddies}->{$group};
 	} elsif($what == MODBL_WHAT_BUDDY and $action == MODBL_ACTION_ADD) {
 		$self->mod_buddylist(MODBL_ACTION_ADD, MODBL_WHAT_GROUP, $group) unless exists $self->{buddies}->{$group};
 		@buddies = grep {not exists $self->{buddies}->{$group}->{members}->{$_}} @buddies;
 		return unless @buddies;
-		$groupid = $self->{buddies}->{$group}->{groupid};
 		foreach my $buddy(@buddies) {
-			$self->{buddies}->{$group}->{members}->{$buddy}->{buddyid} = $self->newid($self->{buddies}->{$group}->{members});
+			$self->{buddies}->{$group}->{members}->{$buddy} = {
+				buddyid => $self->newid($self->{buddies}->{$group}->{members}),
+				data => tlvtie,
+				online => 0,
+				comment => undef
+			};
 		}
 	} elsif($what == MODBL_WHAT_BUDDY and $action == MODBL_ACTION_DEL) {
 		return unless exists $self->{buddies}->{$group};
 		@buddies = grep {exists $self->{buddies}->{$group}->{members}->{$_}} @buddies;
 		return unless @buddies;
-		$groupid = $self->{buddies}->{$group}->{groupid};
 		foreach my $buddy(@buddies) {
-			push @ids, $self->{buddies}->{$group}->{members}->{$buddy}->{buddyid};
 			delete $self->{buddies}->{$group}->{members}->{$buddy};
 		}
 		$self->mod_buddylist(MODBL_ACTION_DEL, MODBL_WHAT_GROUP, $group) unless scalar keys %{$self->{buddies}->{$group}->{members}};
 	}
-
-	$self->{bos}->snac_put(family => 0x13, subtype => 0x11) unless $self->{blmod}++;
-
-	foreach $buddy(@buddies) {
-		$packet .= pack("na*", length($buddy), $buddy);
-		$packet .= pack("n", $groupid);
-		if($what == MODBL_WHAT_BUDDY) {
-			if($action == MODBL_ACTION_ADD) {
-				$packet .= pack("n", $self->{buddies}->{$group}->{members}->{$buddy}->{buddyid});
-			} else {
-				$packet .= pack("n", shift @ids);
-			}
-		} else {
-			$packet .= pack("n", 0);
-		}
-		$packet .= pack("n", ($what == MODBL_WHAT_BUDDY) ? 0 : 1);
-		if($what == MODBL_WHAT_GROUP and $action == MODBL_ACTION_DEL) {
-			$packet .= pack("nnnn", 1, 4, 0xC8, 0);
-		} else {
-			$packet .= pack("n", 0);
-		}
-	}
-
-	$self->{bos}->snac_put(family => 0x13, subtype => $subtype, data => $packet);
-	push @{$self->{modgroups}}, $group;
-
-	$self->{blmod}--;
-}
-
-sub modgroups($) {
-	my $self = shift;
-
-	return if $self->{blmod}; #{blmod} is a lock on the blist.
-
-	if($self->{bltdone}) {
-		delete $self->{bltdone};
-		$self->{bos}->snac_put(family => 0x13, subtype => 0x12);
-		return;
-	}
-
-	return unless ref($self->{modgroups}) eq "ARRAY";
-
-	my @groups = @{$self->{modgroups}};
-
-	delete $self->{modgroups};
-
-	if(!@groups) {
-		delete $self->{blmod};
-		$self->{bos}->snac_put(family => 0x13, subtype => 0x12);
-		return;
-	}
-	foreach my $group(@groups) {
-		my $packet = "";
-		my @members = ();
-		@members = keys %{$self->{buddies}->{$group}->{members}} if exists $self->{buddies}->{$group};
-		if(@members) {
-			$packet .= pack("na*", length($group), $group);
-			$packet .= pack("nn", $self->{buddies}->{$group}->{groupid}, 0);
-
-			my(%tlv, %subtlv);
-
-			tie %tlv, "Net::OSCAR::TLV";
-			tie %subtlv, "Net::OSCAR::TLV";
-
-			%subtlv = (
-				0xC8 => pack("n*", map { $self->{buddies}->{$group}->{members}->{$_}->{buddyid} } @members)
-			);
-			%tlv = (0x01 => $self->{bos}->tlv_encode(\%subtlv));
-			$packet .= $self->{bos}->tlv_encode(\%tlv);
-		} else {
-			$packet .= pack("n*", 0, 0, 0, 1, 2*scalar keys %{$self->{buddies}}, 0xC8, 4, map { $_->{groupid} } grep { $_->{groupid} != 0xFFFF } values %{$self->{buddies}});
-		}
-
-		$self->{bos}->snac_put(family => 0x13, subtype => 0x09, data => $packet);
-	}
-	$self->{bltdone} = 1;
 }
 
 sub extract_userinfo($$) {
@@ -712,11 +734,12 @@ sub extract_userinfo($$) {
 	my $tlvcnt;
 
 	($retval->{screenname}, $retval->{evil}, $tlvcnt) = unpack("C/a* n n", $data);
+	$retval->{screenname} = new Net::OSCAR::Screenname $retval->{screenname};
 	$retval->{evil} /= 10;
 	substr($data, 0, 5+length($retval->{screenname})) = "";
 	$self->debug_print("Decoding userinfo TLV with tlvcnt $tlvcnt.");
 
-	my($tlv, $chainlen) = $self->{bos}->tlv_decode($data, $tlvcnt);
+	my($tlv, $chainlen) = tlv_decode($data, $tlvcnt);
 	#$chainlen--;
 
 	$self->debug_print("Done decoding userinfo TLV - chainlen $chainlen.");
@@ -728,15 +751,15 @@ sub extract_userinfo($$) {
 	$retval->{free} = $flags & 0x10;
 	$retval->{away} = $flags & 0x20;
 
-	($retval->{membersince}) = unpack("N", $tlv->{2});
-	($retval->{onsince}) = unpack("N", $tlv->{3});
+	($retval->{membersince}) = unpack("N", $tlv->{2}) if exists($tlv->{2});
+	($retval->{onsince}) = unpack("N", $tlv->{3}) if exists($tlv->{3});
 	($retval->{idle}) = unpack("n", $tlv->{4}) if exists($tlv->{4});
-	($retval->{capabilities}) = $tlv->{0xD};
+	($retval->{capabilities}) = $tlv->{0xD} if exists($tlv->{0xD});
 
 	substr($data, 0, $chainlen) = "";
 
 	if($data) {
-		$tlv = $self->{bos}->tlv_decode($data);
+		$tlv = tlv_decode($data);
 		$retval->{profile} = $tlv->{0x2} if $tlv->{0x2};
 		$retval->{awaymsg} = $tlv->{0x4} if $tlv->{0x4};
 		$retval->{chatdata} = $tlv->{0x5} if $tlv->{0x5};
@@ -794,13 +817,12 @@ sub send_im($$$;$) {
 	$packet .= pack("n", 1); # channel
 	$packet .= pack("Ca*", length($to), $to);
 
-	$packet .= pack("n5 C n C n3 a*", 2, length($msg)+16, 0x501, 4, 0x101, 1,
-		0x201, 1, length($msg)+4, 0, 0, $msg);
+	$packet .= tlv(2 => pack("n3 C n C n3 a*", 0x501, 4, 0x101, 1, 0x201, 1, length($msg)+4, 0, 0, $msg));
 
 	if($away) {
-		$packet .= pack("nn", 4, 0);
+		$packet .= tlv(4 => "");
 	} else {
-		$packet .= pack("nn", 3, 0); #request server confirmation
+		$packet .= tlv(3 => ""); #request server confirmation
 	}
 
 	$self->{bos}->snac_put(reqdata => $to, family => 0x4, subtype => 0x6, data => $packet);
@@ -815,16 +837,13 @@ Returns a reference to a tied hash which automatically normalizes its keys upon 
 Use this for hashes whose keys are AIM screennames since AIM screennames with different
 capitalization and spacing are considered equivalent.
 
+The keys of the hash as returned by the C<keys> and C<each> functions will be
+C<Net::OSCAR::Screenname> objects, so you they will automagically be compared
+without regards to case and whitespace.
+
 =cut
 
-sub buddyhash($) { shift->bltie(); }
-
-sub bltie($) {
-	my $self = shift;
-	my %bl;
-	tie %bl, "Net::OSCAR::Buddylist";
-	return \%bl;
-}
+sub buddyhash($) { bltie; }
 
 sub im_parse($$) {
 	my($self, $data) = @_;
@@ -850,7 +869,7 @@ sub im_parse($$) {
 		substr($data, 0, $tlvlen) = "";
 		$self->debug_print("Decoding ICBM secondary TLV.");
 
-		my $tlv = $self->{bos}->tlv_decode($data);
+		my $tlv = tlv_decode($data);
 		$msg = $tlv->{2};
 
 		substr($msg, 0, 2) = "";
@@ -872,7 +891,7 @@ sub im_parse($$) {
 		$away = 0;
 
 		substr($data, 0, 26) = "";
-		my $tlv = $self->{bos}->tlv_decode($data);
+		my $tlv = tlv_decode($data);
 		$msg = $tlv->{0xC};
 		if($tlv->{0x2711}) {
 			($chaturl) = unpack("xx C/a*", $tlv->{0x2711});
@@ -929,13 +948,14 @@ marked as no longer being away.
 
 =cut
 
-sub set_away($$) { shift->set_info("", @_); }
+sub set_away($$) { shift->set_info(undef, shift); }
 
 =pod
 
 =item set_info (PROFILE)
 
-Sets the user's profile.
+Sets the user's profile.  Call L<"commit_buddylist"> to have
+the new profile stored on the OSCAR server.
 
 =cut
 
@@ -945,9 +965,10 @@ sub set_info($$;$) {
 	my %tlv;
 	tie %tlv, "Net::OSCAR::TLV";
 
-	if($profile) {
+	if(defined($profile)) {
 		$tlv{0x1} = ENCODING;
 		$tlv{0x2} = $profile;
+		$self->{profile} = $profile;
 	}
 
 	if(defined($awaymsg)) {
@@ -958,8 +979,8 @@ sub set_info($$;$) {
 	$tlv{0x5} = $self->capabilities();
 
 	$self->debug_print("Setting user information.");
-	$self->{bos}->snac_put(family => 0x02, subtype => 0x04, data => $self->{bos}->tlv_encode(\%tlv));
-}		
+	$self->{bos}->snac_put(family => 0x02, subtype => 0x04, data => tlv_encode(\%tlv));
+}
 
 sub svcdo($$%) {
 	my($self, $service, %snac) = @_;
@@ -1009,7 +1030,7 @@ sub change_password($$$) {
 		0x12 => $currpass
 	);
 
-	$self->svcdo(CONNTYPE_ADMIN, family => 0x07, subtype => 0x04, data => $self->{bos}->tlv_encode(\%tlv));
+	$self->svcdo(CONNTYPE_ADMIN, family => 0x07, subtype => 0x04, data => tlv_encode(\%tlv));
 }
 
 =pod
@@ -1054,7 +1075,7 @@ sub change_email($$) {
 		$self->callback_admin_error(ADMIN_TYPE_EMAIL_CHANGE, ADMIN_ERROR_REQPENDING);
 		return;
 	}
-	$self->svcdo(CONNTYPE_ADMIN, family => 0x07, subtype => 0x04, data => pack("nna*", 0x11, length($newmail), $newmail));
+	$self->svcdo(CONNTYPE_ADMIN, family => 0x07, subtype => 0x04, data => tlv(0x11 => $newmail));
 }
 
 =pod
@@ -1074,7 +1095,7 @@ sub format_screenname($$) {
 		$self->callback_admin_error(ADMIN_TYPE_SCREENNAME_FORMAT, ADMIN_ERROR_REQPENDING);
 		return;
 	}
-	$self->svcdo(CONNTYPE_ADMIN, family => 0x07, subtype => 0x04, data => pack("nn a*", 1, length($newname), $newname));
+	$self->svcdo(CONNTYPE_ADMIN, family => 0x07, subtype => 0x04, data => tlv(1 => $newname));
 }
 
 =pod
@@ -1122,7 +1143,7 @@ sub chat_accept($$) {
 
 sub crapout($$$) {
 	my($self, $connection, $reason) = @_;
-	$self->callback_error($connection, $reason, 0, "", "", 0, 0, 1);
+	send_error($self, $connection, 0, $reason, 1);
 	$self->signoff();
 }
 
@@ -1185,6 +1206,7 @@ sub selector_filenos($) {
 	my($rin, $win) = ('', '');
 
 	foreach my $connection(@{shift->{connections}}) {
+		next unless $connection->{socket};
 		if($connection->{connected}) {
 			vec($rin, fileno $connection->{socket}, 1) = 1;
 		} else {
@@ -1208,7 +1230,8 @@ Returns a list of groups in the user's buddylist.
 
 Returns the names of the buddies in the specified group in the user's buddylist.
 The names may not be formatted - that is, they may have spaces and capitalization
-removed.
+removed.  The names are C<Net::OSCAR::Screenname> objects, so you don't have to
+worry that they're case and whitespace insensitive when using them for comparison.
 
 =item buddy (BUDDY[, GROUP])
 
@@ -1225,7 +1248,13 @@ be present.
 =item screenname
 
 The formatted version of the user's screenname.  This includes all spacing and
-capitalization.
+capitalization.  This is a C<Net::OSCAR::Screenname> object, so you don't have to
+worry about the fact that it's case and whitespace insensitive when comparing it.
+
+=item comment
+
+A user-defined comment associated with the buddy.  See L<"set_buddy_comment">.
+Note that this key will be present but undefined if there is no comment.
 
 =item trial
 
@@ -1276,6 +1305,7 @@ sub visibility($) { return shift->{visibility}; }
 sub groups($) { return keys %{shift->{buddies}}; }
 sub buddies($;$) {
 	my($self, $group) = @_;
+
 	return keys %{$self->{buddies}->{$group}->{members}} if $group;
 	return map { keys %{$_->{members}} } values %{$self->{buddies}};
 }
@@ -1287,6 +1317,24 @@ sub buddy($$;$) {
 }
 sub email($) { return shift->{email}; }
 sub screenname($) { return shift->{screenname}; }
+
+=pod
+
+=item set_buddy_comment(GROUP, BUDDY[, COMMENT])
+
+Set a brief comment about a buddy.  This can be used for things such
+as the buddy's real name.  You must call L<"commit_buddylist"> to save
+the comment to the server.  If COMMENT is undefined, the comment is
+deleted.
+
+=cut
+
+sub set_buddy_comment($$$;$) {
+	my($self, $group, $buddy, $comment) = @_;
+	$self->{buddies}->{$group}->{members}->{$buddy}->{comment} = $comment;
+}
+
+=pod
 
 =item chat_invite(CHAT, MESSAGE, WHO)
 
@@ -1337,23 +1385,16 @@ when using multiple C<Net::OSCAR> objects.
 
 =over 4
 
-=item error (OSCAR, CONNECTION, DESCRIPTION, ERRNO, URL, REQDATA, FAMILY, SUBTYPE[, FATAL])
+=item error (OSCAR, CONNECTION, ERROR, DESCRIPTION, FATAL)
 
-Called when any sort of error occurs (except see L<admin_error> below.)  Note that most
-of these parameters, except for OSCAR, DESCRIPTION, and FATAL, are optional.
+Called when any sort of error occurs (except see L<admin_error> below.)
 
-CONNECTION is the particular connection which generated the error - the C<debug_print> method of
+C<CONNECTION> is the particular connection which generated the error - the C<debug_print> method of
 C<Net::OSCAR::Connection> may be useful, as may be getting C<$connection->{description}>.
-DESCRIPTION is a somewhat nicely formatted error message.  It is recommended that you just
-use this and ignore all the other parameters (except for FATAL) unless you want to get fancy.
+C<DESCRIPTION> is a nicely formatted description of the error.  C<ERROR> is an error number.
 
-ERRNO is the error number - a list of error descriptions indexed by error number is returned
-by C<Net::OSCAR::Common::ERRORS>.  URL is an http URL which the user can visit for more information
-about the error.  REQDATA is some data the was associated with the request which generated the error.
-At present, it is a screenname for errors sending IMs or retrieving user information.  FAMILY and
-SUBTYPE are the SNAC numbers of the request which generated the error and probably aren't too useful
-to you.  FATAL is non-zero if the error was fatal - something like an invalid password on signon or
-the connection to OSCAR being severed.
+If C<FATAL> is non-zero, the error was fatal and the connection to OSCAR has been
+closed.
 
 =item rate_alert (OSCAR, LEVEL, CLEAR, WINDOW)
 
@@ -1368,6 +1409,20 @@ about to be disconnected.
 CLEAR and WINDOW tell you the maximum speed you can send in order to maintain RATE_CLEAR standing.
 You must send no more than WINDOW commands in CLEAR milliseconds.  If you just want to keep it
 simple, you can just not send any commands for CLEAR milliseconds and you'll be fine.
+
+=item buddylist_error (OSCAR, ERROR, WHAT)
+
+This is called when there is an error commiting changes to the buddylist.
+C<ERROR> is the error number.  C<WHAT> is a string describing which buddylist
+change failed.  C<Net::OSCAR> will revert the failed change to
+its state before C<commit_buddylist> was called.  Note that the
+buddylist contains information other than the user's buddies - see 
+any method which says you need to call C<commit_buddylist> to have its
+changes take effect.
+
+=item buddylist_ok (OSCAR)
+
+This is called when your changes to the buddylist have been successfully commited.
 
 =item admin_error (OSCAR, REQTYPE, ERROR, ERRURL)
 
@@ -1474,6 +1529,8 @@ sub callback_chat_invite(@) { do_callback("chat_invite", @_); }
 sub callback_buddy_info(@) { do_callback("buddy_info", @_); }
 sub callback_evil(@) { do_callback("evil", @_); }
 sub callback_chat_closed(@) { do_callback("chat_closed", @_); }
+sub callback_buddylist_error(@) { do_callback("buddylist_error", @_); }
+sub callback_buddylist_ok(@) { do_callback("buddylist_ok", @_); }
 sub callback_admin_error(@) { do_callback("admin_error", @_); }
 sub callback_admin_ok(@) { do_callback("admin_ok", @_); }
 sub callback_rate_alert(@) { do_callback("rate_alert", @_); }
@@ -1492,6 +1549,8 @@ sub set_callback_chat_invite($\&) { set_callback("chat_invite", @_); }
 sub set_callback_buddy_info($\&) { set_callback("buddy_info", @_); }
 sub set_callback_evil($\&) { set_callback("evil", @_); }
 sub set_callback_chat_closed($\&) { set_callback("chat_closed", @_); }
+sub set_callback_buddylist_error($\&) { set_callback("buddylist_error", @_); }
+sub set_callback_buddylist_ok($\&) { set_callback("buddylist_ok", @_); }
 sub set_callback_admin_error($\&) { set_callback("admin_error", @_); }
 sub set_callback_admin_ok($\&) { set_callback("admin_ok", @_); }
 sub set_callback_rate_alert($\&) { set_callback("rate_alert", @_); }
@@ -1583,6 +1642,10 @@ instance, an error message and an error number.)
 
 =item RATE_DISCONNECT
 
+=item GROUPPERM_OSCAR
+
+=item GROUPPERM_AOL
+
 =back
 
 =head1 Net::AIM Compatibility
@@ -1643,9 +1706,41 @@ oscartest is a minimalist implementation of a C<Net::OSCAR> client.
 snacsnatcher is a tool designed for analyzing the OSCAR protocol from
 libpcap-format packet captures.
 
+There is a class C<Net::OSCAR::Screenname>.  OSCAR screennames
+are case and whitespace insensitive, and if you do something like
+C<$buddy = new Net::OSCAR::Screenname "Matt Sachs"> instead of
+C<$buddy = "Matt Sachs">, this will be taken care of for you when
+you use the string comparison operators (eq, ne, cmp, etc.)
+
 =head1 HISTORY
 
 =over 4
+
+=item *
+
+0.08, 2001-09-07
+
+=over 4
+
+=item *
+
+Totally rewritten buddylist handling.  It is now much cleaner, bug-resistant,
+and featureful.
+
+=item *
+
+Many, many internal changes that I don't feel like enumerating.
+Hey, there's a reason that I haven't declared the interface stable yet! ;)
+
+=item *
+
+New convenience object: Net::OSCAR::Screenname
+
+=item *
+
+Makefile.PL: Fixed perl version test and compatibility with BSD make
+
+=back
 
 =item *
 

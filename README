@@ -22,7 +22,7 @@ INSTALLATION
     See "perlmodinstall" for details.
 
 DEPENDENCIES
-    This modules requies "Digest::MD5" and "Scalar::Util".
+    This modules requires "Digest::MD5" and "Scalar::Util".
 
 ABSTRACT
     "Net::OSCAR" implements the OSCAR protocol which is used by AOL's AOL
@@ -162,9 +162,29 @@ METHODS
         could not be found in any group. If BUDDY is in multiple groups,
         will return the first one we find.
 
+    commit_buddylist
+        Sends your modified buddylist to the OSCAR server. Changes to the
+        buddylist won't actually take effect until this method is called.
+        Methods that change the buddylist have a warning about needing to
+        call this method in their documentation.
+
+    rollback_buddylist
+        Revert changes you've made to the buddylist, assuming you haven't
+        called the section on "commit_buddylist" since making them.
+
+    reorder_groups GROUPS
+        Changes the ordering of the groups in your buddylist. Call the
+        section on "commit_buddylist" to save the new order on the OSCAR
+        server.
+
+    reorder_buddies GROUP BUDDIES
+        Changes the ordering of the buddies in a group on your buddylist.
+        Call the section on "commit_buddylist" to save the new order on the
+        OSCAR server.
+
     add_permit (BUDDIES)
-        Add buddies to your permit list. Note that this is the same as
-        calling the add_buddy manpage with a group of "permit".
+        Add buddies to your permit list. Call the section on
+        "commit_buddylist" for the change to take effect.
 
     add_deny (BUDDIES)
         See the add_permit manpage.
@@ -182,7 +202,8 @@ METHODS
         Returns a list of all members of the deny list.
 
     add_buddy (GROUP, BUDDIES)
-        Adds buddies to the given group on your buddylist.
+        Adds buddies to the given group on your buddylist. Call the section
+        on "commit_buddylist" for the change to take effect.
 
     remove_buddy (GROUP, BUDDIES)
         See the add_buddy manpage.
@@ -216,6 +237,50 @@ METHODS
         messages. You can talk to them if you are in the same chatroom,
         although neither of you can invite the other one into a chatroom.
 
+        Call the section on "commit_buddylist" for the change to take
+        effect.
+
+    set_group_permissions NEWPERMS
+        Set group permissions. This lets you block any OSCAR users or any
+        AOL users. "NEWPERMS" should be a list of zero or more of the
+        following constants:
+
+        GROUPPERM_OSCAR
+            Permit AOL Instant Messenger users to contact you.
+
+        GROUPPERM_AOL
+            Permit AOL subscribers to contact you.
+
+        Call the section on "commit_buddylist" for the change to take
+        effect.
+
+    group_permissions
+        Returns current group permissions. The return value is a list like
+        the one that the section on "set_group_permissions" wants.
+
+    profile
+        Returns your current profile.
+
+    get_app_data [GROUP[, BUDDY]]
+        Gets application-specific data. Returns a hashref whose keys are
+        app-data IDs. IDs with high-order byte 0x0001 are reserved for
+        non-application-specific usage and must be registered with the
+        "libfaim-aim-protocol@lists.sourceforge.net" list. If you wish to
+        set application-specific data, you should reserve a high-order byte
+        for your application by emailing
+        "libfaim-aim-protocol@lists.sourceforge.net". This data is stored in
+        your server-side buddylist and so will be persistent, even across
+        machines.
+
+        If "GROUP" is present, a hashref for accessing data specific to that
+        group is returned.
+
+        If "BUDDY" is present, a hashref for accessing data specific to that
+        buddy is returned.
+
+        Call the section on "commit_buddylist" to have the new data saved on
+        the OSCAR server.
+
     get_info (WHO)
         Requests a user's information, which includes their profile and idle
         time. See the the buddy_info manpage callback for more information.
@@ -237,6 +302,10 @@ METHODS
         screennames since AIM screennames with different capitalization and
         spacing are considered equivalent.
 
+        The keys of the hash as returned by the "keys" and "each" functions
+        will be "Net::OSCAR::Screenname" objects, so you they will
+        automagically be compared without regards to case and whitespace.
+
     evil (WHO[, ANONYMOUSLY])
         "Evils", or "warns", a user. Evilling a user increases their evil
         level, which makes them look bad and decreases the rate at which
@@ -254,7 +323,8 @@ METHODS
         no longer being away.
 
     set_info (PROFILE)
-        Sets the user's profile.
+        Sets the user's profile. Call the section on "commit_buddylist" to
+        have the new profile stored on the OSCAR server.
 
     change_password (CURRENT PASSWORD, NEW PASSWORD)
         Changes the user's password.
@@ -321,7 +391,10 @@ METHODS
     buddies (GROUP)
         Returns the names of the buddies in the specified group in the
         user's buddylist. The names may not be formatted - that is, they may
-        have spaces and capitalization removed.
+        have spaces and capitalization removed. The names are
+        "Net::OSCAR::Screenname" objects, so you don't have to worry that
+        they're case and whitespace insensitive when using them for
+        comparison.
 
     buddy (BUDDY[, GROUP])
         Returns information about a buddy on the user's buddylist. This
@@ -333,7 +406,15 @@ METHODS
 
         screenname
             The formatted version of the user's screenname. This includes
-            all spacing and capitalization.
+            all spacing and capitalization. This is a
+            "Net::OSCAR::Screenname" object, so you don't have to worry
+            about the fact that it's case and whitespace insensitive when
+            comparing it.
+
+        comment
+            A user-defined comment associated with the buddy. See the
+            section on "set_buddy_comment". Note that this key will be
+            present but undefined if there is no comment.
 
         trial
             The user's account has trial status.
@@ -370,6 +451,12 @@ METHODS
         Returns the user's current screenname, including all capitalization
         and spacing.
 
+    set_buddy_comment(GROUP, BUDDY[, COMMENT])
+        Set a brief comment about a buddy. This can be used for things such
+        as the buddy's real name. You must call the section on
+        "commit_buddylist" to save the comment to the server. If COMMENT is
+        undefined, the comment is deleted.
+
     chat_invite(CHAT, MESSAGE, WHO)
         Deprecated. Provided for compatibility with "Net::AIM". Use the
         appropriate method of the "Net::OSCAR::Chat" object instead.
@@ -392,29 +479,18 @@ CALLBACKS
     each callback function will be the "Net::OSCAR" object which generated
     the callback. This is useful when using multiple "Net::OSCAR" objects.
 
-    error (OSCAR, CONNECTION, DESCRIPTION, ERRNO, URL, REQDATA, FAMILY,
-    SUBTYPE[, FATAL])
+    error (OSCAR, CONNECTION, ERROR, DESCRIPTION, FATAL)
         Called when any sort of error occurs (except see the admin_error
-        manpage below.) Note that most of these parameters, except for
-        OSCAR, DESCRIPTION, and FATAL, are optional.
+        manpage below.)
 
-        CONNECTION is the particular connection which generated the error -
-        the "debug_print" method of "Net::OSCAR::Connection" may be useful,
-        as may be getting "$connection-"{description}>. DESCRIPTION is a
-        somewhat nicely formatted error message. It is recommended that you
-        just use this and ignore all the other parameters (except for FATAL)
-        unless you want to get fancy.
+        "CONNECTION" is the particular connection which generated the error
+        - the "debug_print" method of "Net::OSCAR::Connection" may be
+        useful, as may be getting "$connection-"{description}>.
+        "DESCRIPTION" is a nicely formatted description of the error.
+        "ERROR" is an error number.
 
-        ERRNO is the error number - a list of error descriptions indexed by
-        error number is returned by "Net::OSCAR::Common::ERRORS". URL is an
-        http URL which the user can visit for more information about the
-        error. REQDATA is some data the was associated with the request
-        which generated the error. At present, it is a screenname for errors
-        sending IMs or retrieving user information. FAMILY and SUBTYPE are
-        the SNAC numbers of the request which generated the error and
-        probably aren't too useful to you. FATAL is non-zero if the error
-        was fatal - something like an invalid password on signon or the
-        connection to OSCAR being severed.
+        If "FATAL" is non-zero, the error was fatal and the connection to
+        OSCAR has been closed.
 
     rate_alert (OSCAR, LEVEL, CLEAR, WINDOW)
         This is called when you are sending commands to OSCAR too quickly.
@@ -432,6 +508,19 @@ CALLBACKS
         commands in CLEAR milliseconds. If you just want to keep it simple,
         you can just not send any commands for CLEAR milliseconds and you'll
         be fine.
+
+    buddylist_error (OSCAR, ERROR, WHAT)
+        This is called when there is an error commiting changes to the
+        buddylist. "ERROR" is the error number. "WHAT" is a string
+        describing which buddylist change failed. "Net::OSCAR" will revert
+        the failed change to its state before "commit_buddylist" was called.
+        Note that the buddylist contains information other than the user's
+        buddies - see any method which says you need to call
+        "commit_buddylist" to have its changes take effect.
+
+    buddylist_ok (OSCAR)
+        This is called when your changes to the buddylist have been
+        successfully commited.
 
     admin_error (OSCAR, REQTYPE, ERROR, ERRURL)
         This is called when there is an error performing an administrative
@@ -558,6 +647,8 @@ CONSTANTS
     RATE_ALERT
     RATE_LIMIT
     RATE_DISCONNECT
+    GROUPPERM_OSCAR
+    GROUPPERM_AOL
 Net::AIM Compatibility
     Here are the major differences between the "Net::OSCAR" interface and
     the "Net::AIM" interface:
@@ -590,7 +681,27 @@ MISCELLANEOUS
     snacsnatcher is a tool designed for analyzing the OSCAR protocol from
     libpcap-format packet captures.
 
+    There is a class "Net::OSCAR::Screenname". OSCAR screennames are case
+    and whitespace insensitive, and if you do something like "$buddy = new
+    Net::OSCAR::Screenname "Matt Sachs"" instead of "$buddy = "Matt Sachs"",
+    this will be taken care of for you when you use the string comparison
+    operators (eq, ne, cmp, etc.)
+
 HISTORY
+    *   0.08, 2001-09-07
+
+        *   Totally rewritten buddylist handling. It is now much cleaner,
+            bug-resistant, and featureful.
+
+        *   Many, many internal changes that I don't feel like enumerating.
+            Hey, there's a reason that I haven't declared the interface
+            stable yet! ;)
+
+        *   New convenience object: Net::OSCAR::Screenname
+
+        *   Makefile.PL: Fixed perl version test and compatibility with BSD
+            make
+
     *   0.07, 2001-08-13
 
         *   A bunch of Makefile.PL fixes

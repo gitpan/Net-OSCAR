@@ -1,8 +1,8 @@
+use 5.006;
 use ExtUtils::MakeMaker;
 # See lib/ExtUtils/MakeMaker.pm for details of how to influence
 # the contents of the Makefile that is written.
 
-die "This module requires perl 5.6.0 or newer - you have $]\n" unless $] >= 5.006;
 
 WriteMakefile(
     'dist'		=> { DIST_DEFAULT => 'predist tardist' },
@@ -15,10 +15,16 @@ WriteMakefile(
 );
 
 sub MY::postamble {
+	# BSD make uses .ifdef, GNU make uses just ifdef.
+	# Feh.
+	my $makever = `make -v | head -1`;
+	my $dot = "";
+	$dot = "." if $makever !~ /GNU/;
 	<<EOF;
 
 .PHONY: predist
-ifdef OSCARVER
+
+${dot}ifdef OSCARVER
 VERSION = \$(OSCARVER)
 VERSION_SYM = \$(OSCARVER)
 XS_VERSION = \$(OSCARVER)
@@ -31,10 +37,10 @@ predist:
 	\@cvs rtag -R -F \$(CVS_TAG) net-oscar
 	\@pod2html OSCAR.pm > /home/webstuff/programs/net-oscar/net-oscar.html
 	\@pod2text OSCAR.pm > README
-else
+${dot}else
 predist:
 	\@echo "You must define OSCARVER!"
 	\@false
-endif
+${dot}endif
 EOF
 }

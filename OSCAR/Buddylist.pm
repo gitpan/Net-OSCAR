@@ -1,6 +1,6 @@
 package Net::OSCAR::Buddylist;
 
-$VERSION = 0.07;
+$VERSION = 0.08;
 
 use strict;
 use vars qw($VERSION);
@@ -8,12 +8,24 @@ use warnings;
 
 use Carp;
 use Net::OSCAR::Common qw(:all);
+use Net::OSCAR::Screenname;
 
 sub new {
 	my $pkg = shift;
+	$pkg->{nonorm} = 0;
+	$pkg->{nonorm} = shift if @_;
 	$pkg->TIEHASH(@_);
 }
 
+sub setorder {
+	my $self = shift;
+
+	# Anything not specified gets shoved at the end
+	my @end = grep { my $inbud = $_; not grep { $_ eq $inbud } @_ } @{$self->{ORDERFORM}};
+
+	@{$self->{ORDERFORM}} = @_;
+	push @{$self->{ORDERFORM}}, @end;
+}
 
 sub TIEHASH {
 	my $class = shift;
@@ -23,33 +35,31 @@ sub TIEHASH {
 
 sub FETCH {
 	my($self, $key) = @_;
-	$self->{DATA}->{normalize($key)};
+	$self->{DATA}->{$self->{nonorm} ? $key : normalize($key)};
 }
 
 sub STORE {
 	my($self, $key, $value) = @_;
-	my($normalkey) = normalize($key);
-	if(exists $self->{DATA}->{$normalkey}) {
+	if(exists $self->{DATA}->{$self->{nonorm} ? $key : normalize($key)}) {
 		my $foo = 0;
 		for(my $i = 0; $i < scalar @{$self->{ORDERFORM}}; $i++) {
-			next unless $normalkey eq normalize($self->{ORDERFORM}->[$i]);
+			next unless $key eq $self->{ORDERFORM}->[$i];
 			$foo = 1;
-			$self->{ORDERFORM}->[$i] = $key;
+			$self->{ORDERFORM}->[$i] = $self->{nonorm} ? $key : Net::OSCAR::Screenname->new($key);
 			last;
 		}
 	} else {
-		push @{$self->{ORDERFORM}}, $key;
+		push @{$self->{ORDERFORM}}, $self->{nonorm} ? $key : Net::OSCAR::Screenname->new($key);
 	}
-	$self->{DATA}->{$normalkey} = $value;
+	$self->{DATA}->{$self->{nonorm} ? $key : normalize($key)} = $value;
 }
 
 sub DELETE {
 	my($self, $key) = @_;
-	my($normalkey) = normalize($key);
-	my $retval = delete $self->{DATA}->{$normalkey};
+	my $retval = delete $self->{DATA}->{$self->{nonorm} ? $key : normalize($key)};
 	my $foo = 0;
 	for(my $i = 0; $i < scalar @{$self->{ORDERFORM}}; $i++) {
-		next unless $normalkey eq normalize($self->{ORDERFORM}->[$i]);
+		next unless $key eq $self->{ORDERFORM}->[$i];
 		$foo = 1;
 		splice(@{$self->{ORDERFORM}}, $i, 1);
 		last;
@@ -67,7 +77,7 @@ sub CLEAR {
 
 sub EXISTS {
 	my($self, $key) = @_;
-	return exists $self->{DATA}->{normalize($key)};
+	return exists $self->{DATA}->{$self->{nonorm} ? $key : normalize($key)};
 }
 
 sub FIRSTKEY {
@@ -83,7 +93,7 @@ sub NEXTKEY {
 		return wantarray ? () : undef;
 	} else {
 		my $key = $self->{ORDERFORM}->[$currkey];
-		my $normalkey = normalize($key);
+		my $normalkey = $self->{nonorm} ? $key : normalize($key);
 		return wantarray ? ($key, $self->{DATA}->{$normalkey}) : $key;
 	}
 }
