@@ -87,6 +87,25 @@ my @tests = grep {%do_tests ? exists($do_tests{$_->{template}}) : 1} (
 		data => {foo => "foo"},
 		template => "null_pad_data"
 	},{
+		binary => pack("Cnnn n", 3, 1, 2, 3, 4),
+		data => {foo => [1, 2, 3], bar => 4},
+		template => "count_prefix_data"
+	},{
+		binary => pack("na*n na* na* na*  na*n na* na*",
+			length("FRUITS"), "FRUITS", 3,
+				length("apple"), "apple",
+				length("orange"), "orange",
+				length("pear"), "pear",
+			length("VEGGIES"), "VEGGIES", 2,
+				length("lettuce"), "lettuce",
+				length("broccoli"), "broccoli",
+		),
+		data => {foo => [
+			{bar => "FRUITS", baz => [{buzz => "apple"}, {buzz => "orange"}, {buzz => "pear"}]},
+			{bar => "VEGGIES", baz => [{buzz => "lettuce"}, {buzz => "broccoli"}]}
+		]},
+		template => "complex_count_prefix"
+	},{
 		binary => "foo" . chr(0) . "bar" . chr(0),
 		data => {foo => ["foo", "bar"]},
 		template => "null_separated_array"
@@ -174,6 +193,14 @@ my @tests = grep {%do_tests ? exists($do_tests{$_->{template}}) : 1} (
 		binary => pack("nn", 3, 20),
 		data => {foo => 3, bar => 20},
 		template => "ref"
+	},{
+		binary => pack("n", 2),
+		data => {metasyntax => "bar"},
+		template => "enum"
+	},{
+		binary => pack("C", 1),
+		data => {icecream => "chocolate"},
+		template => "enum_default"
 	}
 );
 

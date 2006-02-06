@@ -7,7 +7,7 @@
 		<word name="type" />
 		<data length_prefix="word" name="data" />
 	</define>
-	<define name="subtyped TLV">
+	<define name="subtyped_TLV">
 		<word name="type" />
 		<byte name="subtype" />
 		<data length_prefix="byte" name="data" />
@@ -33,6 +33,18 @@
 	<define name="null_terminated_data"><data name="foo" null_terminated="yes" /><data name="bar" /></define>
 	<define name="null_separated_array"><data name="foo" count="-1" null_terminated="yes" /></define>
 	<define name="null_pad_data"><data name="foo" length="10" pad="0" /></define>
+	<define name="count_prefix_data">
+		<word count_prefix="byte" name="foo" />
+		<word name="bar" />
+	</define>
+	<define name="complex_count_prefix">
+		<data count="-1" name="foo">
+			<data length_prefix="word" name="bar" />
+			<data count_prefix="word" name="baz">
+				<data length_prefix="word" name="buzz" />
+			</data>
+		</data>
+	</define>
 
 	<!-- Count and Length -->
 	<define name="count_len"><data count="-1" length="1" name="foo" /></define>
@@ -138,4 +150,19 @@
 
 	<!-- SNAC -->
 	<define name="snac" family="1" subtype="2"><data /></define>
+
+	<!-- enum -->
+	<define name="enum">
+		<enum type="word" name="metasyntax">
+			<edef name="foo" value="1" />
+			<edef name="bar" value="2" />
+			<edef name="baz" value="3" />
+		</enum>
+	</define>
+	<define name="enum_default">
+		<enum type="byte" name="icecream">
+			<edef name="chocolate" value="1" />
+			<edef name="vanilla" value="2" default="yes" />
+		</enum>
+	</define>
 </oscar>

@@ -14,7 +14,7 @@ use strict;
 use lib "./blib/lib";
 no warnings;
 
-Test::More->import(tests => 27);
+Test::More->import(tests => 31);
 
 require_ok("Net::OSCAR");
 require_ok("Net::OSCAR::XML");
@@ -34,6 +34,8 @@ is_deeply([sort keys(%Net::OSCAR::XML::xmlmap)], [sort qw(
 		null_terminated_data
 		null_separated_array
 		null_pad_data
+		count_prefix_data
+		complex_count_prefix
 		length_prefix
 		vax_prefix
 		repeated_data
@@ -59,7 +61,9 @@ is_deeply([sort keys(%Net::OSCAR::XML::xmlmap)], [sort qw(
 		ref_bar
 		ref
 		snac
-	), "TLV", "subtyped TLV"], "forward name mapping");
+		enum
+		enum_default
+	), "TLV", "subtyped_TLV"], "forward name mapping");
 
 is_deeply({%Net::OSCAR::XML::xml_revmap}, {1 => { 2 => "snac" }}, "reverse name mapping");
 
@@ -110,6 +114,26 @@ is_deeply(
 		{type => 'data', name => "foo", pad => 0, len => 10}
 	],
 	"null-padded data"
+);
+is_deeply(
+	[protoparse($oscar, "count_prefix_data")],
+	[
+		{type => 'num', name => "foo", prefix => "count", prefix_packlet => "C", prefix_len => 1, packlet => 'n', len => 2},
+		{type => 'num', name => "bar", packlet => "n", len => 2}
+	],
+	"count prefix data"
+);
+is_deeply(
+	[protoparse($oscar, "complex_count_prefix")],
+	[
+		{type => 'data', count => -1, name => "foo", items => [
+			{type => 'data', name => "bar", prefix => "length", prefix_packlet => "n", prefix_len => 2},
+			{type => 'data', name => "baz", prefix => "count", prefix_packlet => "n", prefix_len => 2, items => [
+				{type => 'data', name => "buzz", prefix => "length", prefix_packlet => "n", prefix_len => 2},
+			]}
+		]}
+	],
+	"complex count prefix data"
 );
 
 is_deeply(
@@ -244,8 +268,27 @@ is_deeply(
 is_deeply(
 	[protoparse($oscar, "ref")],
 	[
-		{type => 'ref', name => "ref_foo", items => []},
-		{type => 'ref', name => "ref_bar", items => []}
+		{type => 'ref', name => "ref_foo"},
+		{type => 'ref', name => "ref_bar"}
 	],
 	"references"
+);
+
+is_deeply(
+	[protoparse($oscar, "enum")],
+	[
+		{len => 2, type => "num", packlet => "n", name => "metasyntax",
+			enum_byname => {foo => 1, bar => 2, baz => 3},
+			enum_byval => {1 => "foo", 2 => "bar", 3 => "baz"}}
+	],
+	"enum"
+);
+is_deeply(
+	[protoparse($oscar, "enum_default")],
+	[
+		{len => 1, type => "num", packlet => "C", name => "icecream", value => 2,
+			enum_byname => {chocolate => 1, vanilla => 2},
+			enum_byval => {1 => "chocolate", 2 => "vanilla"}}
+	],
+	"enum_default"
 );

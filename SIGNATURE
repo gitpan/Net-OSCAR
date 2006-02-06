@@ -1,0 +1,124 @@
+This file contains message digests of all files listed in MANIFEST,
+signed via the Module::Signature module, version 0.44.
+
+To verify the content in this distribution, first make sure you have
+Module::Signature installed, then type:
+
+    % cpansign -v
+
+It will check each file's integrity, as well as the signature's
+validity.  If "==> Signature verified OK! <==" is not displayed,
+the distribution may already have been compromised, and you should
+not run its Makefile.PL or Build.PL.
+
+-----BEGIN PGP SIGNED MESSAGE-----
+Hash: SHA1
+
+SHA1 ae33baebefb9fa34afce4925af3f5fe8c432740d Build.PL
+SHA1 5b77049f80cb844f3b17e1df60a97ceab9e8039b HACKING
+SHA1 be4596f291e0e47275f6fe6897457a616ce4c589 MANIFEST
+SHA1 af4b95d1cda08140743ec16f1eb641447038addf META.yml
+SHA1 4fd1496064260d0ca5ab249cc6d429c92fe832d2 OSCAR/XML/Protocol.parsed-xml
+SHA1 629acaf4480d589bb1f50e25b1b4045662274cd4 PROTOCOL
+SHA1 68e538e57d4b4e2c31103304af40dd4536255789 TODO
+SHA1 94d94342f4a5b81c0b620323225af7ce79717420 lib/Net/OSCAR.pm
+SHA1 4b4fd621b4cc4fbb7aa09861be35e58985d8869f lib/Net/OSCAR/Buddylist.pm
+SHA1 7c993c139c0a4f372f66490efd657113e8473743 lib/Net/OSCAR/Callbacks.pm
+SHA1 eda09032c660b89a2ebc11828f6807236cb73b2a lib/Net/OSCAR/Callbacks/0/error.pm
+SHA1 c2b73bf7af3330abae07a3c612d0e8dab8483321 lib/Net/OSCAR/Callbacks/1/incoming_extended_information.pm
+SHA1 eb82759d4a70c85c9ca5533f3d30ad90cee996e3 lib/Net/OSCAR/Callbacks/1/incoming_warning.pm
+SHA1 fc10b23d87499533e7882cfa32908fd1a5242c9e lib/Net/OSCAR/Callbacks/1/migrate.pm
+SHA1 fa4b38ea8e1320c1cb079d3cee637605355bcd94 lib/Net/OSCAR/Callbacks/1/pause.pm
+SHA1 ec6fa42a26265c8c574f4ee6e919e5dded48369e lib/Net/OSCAR/Callbacks/1/rate_change.pm
+SHA1 5ca234c57b445940d201fd92a8cc9a98ebf4274f lib/Net/OSCAR/Callbacks/1/rate_info_response.pm
+SHA1 e475d544e7c22ba31ed1749755e36067bcb0a027 lib/Net/OSCAR/Callbacks/1/self_information.pm
+SHA1 586bceb90cf0c4fdc86e57c6bff46a5aecca2779 lib/Net/OSCAR/Callbacks/1/server_ready.pm
+SHA1 28c10d3bf96fad0c9376d4ee690c6b091d4dd46d lib/Net/OSCAR/Callbacks/1/service_redirect_response.pm
+SHA1 3592acebb0886753d6971a4eadde0f425ff73ade lib/Net/OSCAR/Callbacks/1/unpause.pm
+SHA1 0c92c26453fef81d293aa0a8ad993ff5220036ed lib/Net/OSCAR/Callbacks/13/chat_navigator_response.pm
+SHA1 6ac397793e4a3d87668cc070748f831c260e72fb lib/Net/OSCAR/Callbacks/14/chat_buddy_arrival.pm
+SHA1 e6e5d0d7bdc3efc57b86f2bcfa38585607ceb34b lib/Net/OSCAR/Callbacks/14/chat_buddy_departure.pm
+SHA1 9883276affab590b1cdcec0166c160c3dc552ccf lib/Net/OSCAR/Callbacks/14/chat_room_status.pm
+SHA1 a18fa6cf9e7c873afa3b2863aa5602957398240f lib/Net/OSCAR/Callbacks/14/incoming_chat_IM.pm
+SHA1 51bd8520876b54978577230937cfd225aad46e71 lib/Net/OSCAR/Callbacks/16/buddy_icon_downloaded.pm
+SHA1 fbe6179054c0c2491bc9561b8a353f46e6f755cc lib/Net/OSCAR/Callbacks/16/buddy_icon_uploaded.pm
+SHA1 d517b1b46970e18ae2ce12621a8fde606e4d6c8a lib/Net/OSCAR/Callbacks/19/buddylist.pm
+SHA1 d93f6eaf41c7b135b660f2732122186219f7d44c lib/Net/OSCAR/Callbacks/19/buddylist_3_response.pm
+SHA1 0413f0a086014513b879be3a1bc0e1c1ec2a5b7b lib/Net/OSCAR/Callbacks/19/buddylist_add.pm
+SHA1 ec06f026c092de47dbe5d747ddfbb6b342abc989 lib/Net/OSCAR/Callbacks/19/buddylist_delete.pm
+SHA1 f71f41d8b33b93ba3c0535c1b448098759448af6 lib/Net/OSCAR/Callbacks/19/buddylist_error.pm
+SHA1 b112b7c0e4bb4efe98bcfc350c599118b40b234b lib/Net/OSCAR/Callbacks/19/buddylist_modification_acknowledgement.pm
+SHA1 4bb4765915a1c4c88a657b127cd80bbb7d4b808c lib/Net/OSCAR/Callbacks/19/buddylist_modify.pm
+SHA1 01a5f60582dbca73d63d69164871c6afa559c588 lib/Net/OSCAR/Callbacks/19/end_buddylist_modifications.pm
+SHA1 4d8af5e05f874ce83733b9864bdad88a09899ec5 lib/Net/OSCAR/Callbacks/19/start_buddylist_modifications.pm
+SHA1 4f2b4d541ff60891f2e98e59285eb8c76afa6c4f lib/Net/OSCAR/Callbacks/2/incoming_profile.pm
+SHA1 50c0be4a7f0854547e22d6be02a684b853603172 lib/Net/OSCAR/Callbacks/21/ICQ_meta_response.pm
+SHA1 55bed7f9062d7e46e81a23dda980a275ae0d5af5 lib/Net/OSCAR/Callbacks/23/authentication_key.pm
+SHA1 995d421a71470c19cf186bda2faffa4d995ac24e lib/Net/OSCAR/Callbacks/23/authorization_response.pm
+SHA1 945e92f31cbb17403ecc90833b96b218cad212ed lib/Net/OSCAR/Callbacks/3/buddy_rights_response.pm
+SHA1 35d91dc7857d4f6ae68f4d8a78ea6e9bc1091de8 lib/Net/OSCAR/Callbacks/3/buddy_signoff.pm
+SHA1 c9d494e737ae76cb196911f6bed92b8069c25f2c lib/Net/OSCAR/Callbacks/3/buddy_status_update.pm
+SHA1 1b59ebce74eda4a783b7ab5524ead74493da5331 lib/Net/OSCAR/Callbacks/4/IM_acknowledgement.pm
+SHA1 5e1efdf2e6d6fb0a8c6940eb4b2664cc6cb376c1 lib/Net/OSCAR/Callbacks/4/chat_invitation_decline.pm
+SHA1 b9dde9d525fdc5bf0d74a40065ecac1125979475 lib/Net/OSCAR/Callbacks/4/incoming_IM.pm
+SHA1 3839470923ad12d1a0e373d630f5bc3c5df336b6 lib/Net/OSCAR/Callbacks/4/typing_notification.pm
+SHA1 4d3b7b798a5cd5dcc3980cea25e5c85ea5ea4917 lib/Net/OSCAR/Callbacks/7/admin_request_response.pm
+SHA1 dc10d464b36619d0c08dd17dad59dd733a88849b lib/Net/OSCAR/Callbacks/7/confirm_account_response.pm
+SHA1 4d38f4d095a52cfb8f4f1667eca019a5e5e73874 lib/Net/OSCAR/Callbacks/9/BOS_rights_response.pm
+SHA1 ebc7b3a7acbbe6b89c3b670bd44dbdd47b6c2a48 lib/Net/OSCAR/Callbacks/INDEX
+SHA1 e742991659a2ee6aa1f596293738cba2e4836a0e lib/Net/OSCAR/Common.pm
+SHA1 75ee8abfe6f06f945ddfc4494d33b198de02b35e lib/Net/OSCAR/Connection.pm
+SHA1 e9ff3760b8b62fd86f1e2f2865ba7512f4308dab lib/Net/OSCAR/Connection/Chat.pm
+SHA1 8a39cfd2f3fe6ed49cf8998d8820d2a241f65ad7 lib/Net/OSCAR/Connection/Direct.pm
+SHA1 46e2fbc90d17183356c6bed04cc3dbb97b7ba8c0 lib/Net/OSCAR/Connection/Server.pm
+SHA1 f646e50b78c73fa676845a8babc3a1a236881f68 lib/Net/OSCAR/Constants.pm
+SHA1 bf29be2dd50ec88c19957194a2d54db216a9ec27 lib/Net/OSCAR/MethodInfo.pm
+SHA1 80f39a59c46409c25929710b69737da1708a6e9c lib/Net/OSCAR/Proxy.pm
+SHA1 07e56ef1498d03bf9b4e96b78eb83c834fa28695 lib/Net/OSCAR/Screenname.pm
+SHA1 4f1d0cdd8c7774c3e46ca25523a20db2e7e6693d lib/Net/OSCAR/ServerCallbacks.pm
+SHA1 fdacaf5b34ac85630af7bfd873942bfed81395e6 lib/Net/OSCAR/ServerCallbacks/0/BOS_signon.pm
+SHA1 f524e8b1fa69ab5d4f59fd80ca29a13b802ca29a lib/Net/OSCAR/ServerCallbacks/1/personal_info_request.pm
+SHA1 45c4cb063bd25f84d3061188e3425d48bfeb38a3 lib/Net/OSCAR/ServerCallbacks/1/rate_acknowledgement.pm
+SHA1 52e4e0a3a1912ab410eb9308dcb1352dd4761667 lib/Net/OSCAR/ServerCallbacks/1/rate_info_request.pm
+SHA1 a664fe63ff3706580e31cab62c178b2ee6b81c5d lib/Net/OSCAR/ServerCallbacks/1/set_extended_status.pm
+SHA1 5747522b04827a9ff17a5b23df6faaff0fb99774 lib/Net/OSCAR/ServerCallbacks/1/set_service_versions.pm
+SHA1 afadd0a164f4168d9e3fed0700f6bb4d50eae7ae lib/Net/OSCAR/ServerCallbacks/1/set_tool_versions.pm
+SHA1 09fc747ad017c2d14f58740cb55f2daff7b3d1d3 lib/Net/OSCAR/ServerCallbacks/19/buddylist_request.pm
+SHA1 95b4efe6c049143dd8a7ef86e43fe1fdb8d7dc1f lib/Net/OSCAR/ServerCallbacks/19/buddylist_rights_request.pm
+SHA1 967ef66bc2de37b822e5a04239fb5d4813a7284a lib/Net/OSCAR/ServerCallbacks/2/get_away.pm
+SHA1 5cf1a193314130c23bb993635e161c6a747ea5c7 lib/Net/OSCAR/ServerCallbacks/2/locate_rights_request.pm
+SHA1 7a9b66db80253b9ed773a3efa2f561e32e73ed1e lib/Net/OSCAR/ServerCallbacks/23/initial_signon_request.pm
+SHA1 041a1089038220fcc12d4aae779ec0054bf2d239 lib/Net/OSCAR/ServerCallbacks/23/signon.pm
+SHA1 54a0b5c321d50833f8c31de47914946ff83ae12c lib/Net/OSCAR/ServerCallbacks/3/buddy_rights_request.pm
+SHA1 eef0adea169477532cabe15f871f847269954c10 lib/Net/OSCAR/ServerCallbacks/4/IM_parameter_request.pm
+SHA1 eef0adea169477532cabe15f871f847269954c10 lib/Net/OSCAR/ServerCallbacks/4/add_IM_parameters.pm
+SHA1 c567d01179ad4a41aefd3387ade1d853f62b190c lib/Net/OSCAR/ServerCallbacks/4/outgoing_IM.pm
+SHA1 a08bde0ba8569002471b70c575e8c43e4d1d6434 lib/Net/OSCAR/ServerCallbacks/9/BOS_rights_request.pm
+SHA1 d433cab8bfe1eb1d5a373d6a5ae26660f8216561 lib/Net/OSCAR/TLV.pm
+SHA1 9c85e06cdb1ec1d1db1f6e985c07102dc016d34a lib/Net/OSCAR/Utility.pm
+SHA1 66d9872e9ee67f5ad1518498ac5d6bf94b58550f lib/Net/OSCAR/XML.pm
+SHA1 49e280b41fda06a8ee31d28c9698b651699d56de lib/Net/OSCAR/XML/Protocol.dtd
+SHA1 6780392805646b12e603e8ef8d7705501e643ce0 lib/Net/OSCAR/XML/Protocol.parsed-xml
+SHA1 47e17f107c62131c2412342b07e8eddc06424a01 lib/Net/OSCAR/XML/Protocol.xml
+SHA1 7176bdbf8e0d6d915b8bbf3e1330f5c1afa62f14 lib/Net/OSCAR/XML/Template.pm
+SHA1 4d8d6ce4a7d390dd12c0ab96e8e1396b302539c0 lib/Net/OSCAR/_BLInternal.pm
+SHA1 883b42d5d83c415254246807e1d66c3a2abeb6ad oscarserv
+SHA1 aa37d21eb4fc7fcce4b380d86d34dcedee1f85d0 oscartest
+SHA1 1282dcb75110d9e55ddd729c75c8fbc83f71afcb snacsnatcher
+SHA1 70baceb5dc525df57e5481453bf8d5bd47ef1424 t/01_basic.t
+SHA1 f68a0e543b9050e29100404f6acee6374068774a t/02_connections.t
+SHA1 5d5e22d6c97dcf25f91c784b48a8353667bda636 t/03_callbacks.t
+SHA1 e6aeab7c16760756a61286b414c722892b239871 t/04_server_callbacks.t
+SHA1 76800d511b7126fd24caaf040dfff7d7d6773c67 t/05_load_extras.t
+SHA1 8ab0994dd07d2bec2c75a6b712f4ed22a918dd88 t/30_xml_parse.t
+SHA1 cde76089609e92b2fbf1a89a4433e637f7d21ca2 t/40_xml_process.t
+SHA1 80b68e1602e98e3742e2ca190ee5bfc3f2c21228 t/41_xml_cornercases.t
+SHA1 223875da7d93f6f1e02d67b0ae478a3f4ad7e0a0 t/test.xml
+SHA1 0a8390f3325a1c54e235610592f456c07cb72560 xmlcache
+-----BEGIN PGP SIGNATURE-----
+Version: GnuPG v1.4.1 (GNU/Linux)
+
+iD8DBQFD561VlocTNGAKA0IRAuTiAKDsLjnBocaFwEcpMefl5T5aiNAWEACgzhlw
+VlLXVa/8CGPZ+WqC70Vc9xE=
+=By5v
+-----END PGP SIGNATURE-----
