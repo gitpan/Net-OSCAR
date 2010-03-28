@@ -22,8 +22,8 @@ for every protocol element.
 
 package Net::OSCAR::XML;
 
-$VERSION = '1.925';
-$REVISION = '$Revision: 1.24 $';
+$VERSION = '1.926';
+$REVISION = '$Revision$';
 
 use strict;
 use vars qw(@ISA @EXPORT $VERSION);

@@ -6,8 +6,8 @@ Net::OSCAR::Utility -- internal utility functions for Net::OSCAR
 
 package Net::OSCAR::Utility;
 
-$VERSION = '1.925';
-$REVISION = '$Revision: 1.29 $';
+$VERSION = '1.926';
+$REVISION = '$Revision$';
 
 use strict;
 use vars qw(@ISA @EXPORT $VERSION);
@@ -165,7 +165,8 @@ sub tlv_encode($) {
 	my $tlv = shift;
 	my($buffer, $type, $value) = ("", 0, "");
 
-	confess "You must use a tied Net::OSCAR::TLV hash!" unless defined($tlv) and ref($tlv) eq "HASH" and defined(%$tlv) and defined(tied(%$tlv)) and tied(%$tlv)->isa("Net::OSCAR::TLV");
+	confess "You must use a tied Net::OSCAR::TLV hash!" 
+	   unless defined($tlv) and ref($tlv) eq "HASH" and defined(tied(%$tlv)) and tied(%$tlv)->isa("Net::OSCAR::TLV");
 	while (($type, $value) = each %$tlv) {
 		$value ||= "";
 		$buffer .= pack("nna*", $type, length($value), $value);
@@ -205,6 +206,7 @@ sub signon_tlv($;$$) {
 	} else {
 		if($session->{auth_response}) {
 			$protodata{auth_response} = delete $session->{auth_response};
+			$protodata{pass_is_hashed} = "" if delete $session->{pass_is_hashed};
 		} else {
 			# As of AIM 5.5, the password can be MD5'd before
 			# going into the things-to-cat-together-and-MD5.

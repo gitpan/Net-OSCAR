@@ -6,8 +6,8 @@ Net::OSCAR::Callbacks -- Process responses from OSCAR server
 
 package Net::OSCAR::Callbacks;
 
-$VERSION = '1.925';
-$REVISION = '$Revision: 1.134 $';
+$VERSION = '1.926';
+$REVISION = '$Revision$';
 
 use strict;
 use vars qw($VERSION);

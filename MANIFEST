@@ -81,11 +81,13 @@ lib/Net/OSCAR/XML/Protocol.dtd
 lib/Net/OSCAR/XML/Protocol.parsed-xml
 lib/Net/OSCAR/XML/Protocol.xml
 lib/Net/OSCAR/XML/Template.pm
+Makefile.PL
 MANIFEST			This list of files
-OSCAR/XML/Protocol.parsed-xml
+META.yml
 oscarserv
 oscartest
 PROTOCOL
+README
 snacsnatcher
 t/01_basic.t
 t/02_connections.t
@@ -98,5 +100,3 @@ t/41_xml_cornercases.t
 t/test.xml
 TODO
 xmlcache
-META.yml
-SIGNATURE    Added here by Module::Build

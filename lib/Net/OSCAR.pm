@@ -1,7 +1,7 @@
 package Net::OSCAR;
 
-$VERSION = '1.925';
-$REVISION = '$Revision: 1.221 $';
+$VERSION = '1.926';
+$REVISION = '$Revision$';
 
 =pod
 

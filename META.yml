@@ -1,72 +1,76 @@
 ---
 name: Net-OSCAR
-version: 1.925
+version: 1.926
 author:
   - Matthew Sachs E<lt>matthewg@zevils.comE<gt>.
 abstract: "Implementation of AOL's OSCAR protocol for instant messaging (for interacting with AIM a.k.a. AOL IM a.k.a. AOL Instant Messenger - and ICQ, too!)"
 license: perl
+resources:
+  license: http://dev.perl.org/licenses/
 requires:
-  Digest::MD5: >= 2.0
-  Module::Build: >= 0.26
-  Scalar::Util: >= 1.0
-  perl: 5.6.1
+  Digest::MD5: 2
+  Module::Build: 0.26
+  Scalar::Util: 1
+  perl: v5.6.1
 recommends:
-  MIME::Base64: >= 0.01
-  Test::More: >= 0.01
-  Time::HiRes: >= 0.01
-  XML::Parser: >= 0.01
+  MIME::Base64: 0
+  Test::More: 0
+  Time::HiRes: 0
+  XML::Parser: 0
+configure_requires:
+  Module::Build: 0.35
 provides:
   Net::OSCAR:
     file: lib/Net/OSCAR.pm
-    version: 1.925
+    version: 1.926
   Net::OSCAR::Buddylist:
     file: lib/Net/OSCAR/Buddylist.pm
-    version: 1.925
+    version: 1.926
   Net::OSCAR::Callbacks:
     file: lib/Net/OSCAR/Callbacks.pm
-    version: 1.925
+    version: 1.926
   Net::OSCAR::Common:
     file: lib/Net/OSCAR/Common.pm
-    version: 1.925
+    version: 1.926
   Net::OSCAR::Connection:
     file: lib/Net/OSCAR/Connection.pm
-    version: 1.925
+    version: 1.926
   Net::OSCAR::Connection::Chat:
     file: lib/Net/OSCAR/Connection/Chat.pm
-    version: 1.925
+    version: 1.926
   Net::OSCAR::Connection::Direct:
     file: lib/Net/OSCAR/Connection/Direct.pm
-    version: 1.925
+    version: 1.926
   Net::OSCAR::Connection::Server:
     file: lib/Net/OSCAR/Connection/Server.pm
-    version: 1.925
+    version: 1.926
   Net::OSCAR::Constants:
     file: lib/Net/OSCAR/Constants.pm
-    version: 1.925
+    version: 1.926
   Net::OSCAR::MethodInfo:
     file: lib/Net/OSCAR/MethodInfo.pm
-    version: 1.925
+    version: 1.926
   Net::OSCAR::Proxy:
     file: lib/Net/OSCAR/Proxy.pm
-    version: 1.925
+    version: 1.926
   Net::OSCAR::Screenname:
     file: lib/Net/OSCAR/Screenname.pm
-    version: 1.925
+    version: 1.926
   Net::OSCAR::ServerCallbacks:
-    file: lib/Net/OSCAR/ServerCallbacks/1/personal_info_request.pm
-    version: 1.925
+    file: lib/Net/OSCAR/ServerCallbacks.pm
+    version: 1.926
   Net::OSCAR::TLV:
     file: lib/Net/OSCAR/TLV.pm
-    version: 1.925
+    version: 1.926
   Net::OSCAR::Utility:
     file: lib/Net/OSCAR/Utility.pm
-    version: 1.925
+    version: 1.926
   Net::OSCAR::XML:
     file: lib/Net/OSCAR/XML.pm
-    version: 1.925
+    version: 1.926
   Net::OSCAR::XML::Template:
     file: lib/Net/OSCAR/XML/Template.pm
-  Net::OSCAR::_BLInternal:
-    file: lib/Net/OSCAR/_BLInternal.pm
-    version: 1.925
-generated_by: Module::Build version 0.2607
+generated_by: Module::Build version 0.35
+meta-spec:
+  url: http://module-build.sourceforge.net/META-spec-v1.4.html
+  version: 1.4
