@@ -1,6 +1,8 @@
 package Net::OSCAR;
+BEGIN {
+  $Net::OSCAR::VERSION = '1.926_001';
+}
 
-$VERSION = '1.926';
 $REVISION = '$Revision$';
 
 =pod
@@ -8,6 +10,10 @@ $REVISION = '$Revision$';
 =head1 NAME
 
 Net::OSCAR - Implementation of AOL's OSCAR protocol for instant messaging (for interacting with AIM a.k.a. AOL IM a.k.a. AOL Instant Messenger - and ICQ, too!)
+
+=head1 VERSION
+
+version 1.926_001
 
 =head1 SYNOPSIS
 
@@ -117,7 +123,7 @@ when using multiple C<Net::OSCAR> objects.
 
 use 5.006_001;
 use strict;
-use vars qw($VERSION $REVISION @ISA @EXPORT_OK %EXPORT_TAGS $NODESTROY);
+use vars qw($REVISION @ISA @EXPORT_OK %EXPORT_TAGS $NODESTROY);
 use Carp;
 use Scalar::Util qw(weaken);
 use Digest::MD5 qw(md5);
@@ -1428,8 +1434,6 @@ sub set_icon($$) {
 
 =pod
 
-=pod
-
 =item change_password (CURRENT PASSWORD, NEW PASSWORD)
 
 Changes the user's password.
@@ -2041,7 +2045,7 @@ sub would_make_rate_level($$;$) {
 	return $oscar->_rate_level($oscar->_compute_rate($rinfo), $rinfo->{levels});
 }
 
-=cut
+=pod
 
 =back
 
@@ -4497,4 +4501,3 @@ sub connection_for_family($$) {
 }
 
 1;
-

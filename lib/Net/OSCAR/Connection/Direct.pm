@@ -5,14 +5,16 @@ Net::OSCAR::Connection::Direct -- OSCAR direct connections
 =cut
 
 package Net::OSCAR::Connection::Direct;
+BEGIN {
+  $Net::OSCAR::Connection::Direct::VERSION = '1.926_001';
+}
 
-$VERSION = '1.926';
 $REVISION = '$Revision$';
 
 use strict;
 use Carp;
 
-use vars qw(@ISA $VERSION $REVISION);
+use vars qw(@ISA $REVISION);
 use Socket;
 use Symbol;
 use Net::OSCAR::Common qw(:all);

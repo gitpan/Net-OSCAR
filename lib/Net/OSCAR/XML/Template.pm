@@ -2,6 +2,9 @@
 # pack and unpack data according to the specification of that template.
 
 package Net::OSCAR::XML::Template;
+BEGIN {
+  $Net::OSCAR::XML::Template::VERSION = '1.926_001';
+}
 
 use strict;
 use warnings;

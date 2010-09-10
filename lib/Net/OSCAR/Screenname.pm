@@ -1,24 +1,35 @@
 =pod
 
+=head1 NAME
+
 Net::OSCAR::Screenname -- OSCAR screenname class
+
+=head1 VERSION
+
+version 1.926_001
+
+=head1 DESCRIPTION
 
 This class overrides a few operators to transparently get
 appropriate behavior for OSCAR screennames.  Screennames
 are case-insensitive and whitespace-insensitive.  So, if you
 do
+
 	$a = Net::OSCAR::Screenname->new("Some Dude");
 	print "Yay!\n" if $a eq "somedude";
+
 will be true.
 
 =cut
 
 package Net::OSCAR::Screenname;
+BEGIN {
+  $Net::OSCAR::Screenname::VERSION = '1.926_001';
+}
 
-$VERSION = '1.926';
 $REVISION = '$Revision$';
 
 use strict;
-use vars qw($VERSION);
 
 use Net::OSCAR::Utility qw(normalize);
 

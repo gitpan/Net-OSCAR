@@ -1,16 +1,24 @@
 =pod
 
+=head1 NAME
+
 Net::OSCAR::Common -- Net::OSCAR public constants
+
+=head1 VERSION
+
+version 1.926_001
 
 =cut
 
 package Net::OSCAR::Common;
+BEGIN {
+  $Net::OSCAR::Common::VERSION = '1.926_001';
+}
 
-$VERSION = '1.926';
 $REVISION = '$Revision$';
 
 use strict;
-use vars qw(@ISA @EXPORT_OK %EXPORT_TAGS $VERSION);
+use vars qw(@ISA @EXPORT_OK %EXPORT_TAGS);
 use Scalar::Util qw(dualvar);
 require Exporter;
 @ISA = qw(Exporter);
@@ -161,11 +169,11 @@ use constant OSCAR_SVC_AIM => (
 	port => 5190,
 	supermajor => 0x0109,
 	major => 5,
-	minor => 5,
+	minor => 9,
 	subminor => 0,
-	build => 0x0E0B,
-	subbuild => 0x00000104,
-	clistr => "AOL Instant Messenger, version 5.5.3595/WIN32",
+	build => 0x0E76,
+	subbuild => 0x00000111,
+	clistr => "AOL Instant Messenger, version 5.9.3702/WIN32",
 	hashlogin => 0,
 	betainfo => "",
 );

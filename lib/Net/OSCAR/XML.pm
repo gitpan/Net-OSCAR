@@ -1,6 +1,14 @@
 =pod
 
+=head1 NAME
+
 Net::OSCAR::XML -- XML functions for Net::OSCAR
+
+=head1 VERSION
+
+version 1.926_001
+
+=head1 DESCRIPTION
 
 We're doing the fancy-schmancy Protocol.xml stuff here, so I'll explain it here.
 
@@ -21,12 +29,14 @@ for every protocol element.
 =cut
 
 package Net::OSCAR::XML;
+BEGIN {
+  $Net::OSCAR::XML::VERSION = '1.926_001';
+}
 
-$VERSION = '1.926';
 $REVISION = '$Revision$';
 
 use strict;
-use vars qw(@ISA @EXPORT $VERSION);
+use vars qw(@ISA @EXPORT);
 use Carp;
 use Data::Dumper;
 

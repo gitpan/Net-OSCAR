@@ -1,4 +1,7 @@
 package Net::OSCAR::ServerCallbacks;
+BEGIN {
+  $Net::OSCAR::ServerCallbacks::VERSION = '1.926_001';
+}
 use strict;
 use warnings;
 use Net::OSCAR::Common qw(:all);

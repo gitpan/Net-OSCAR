@@ -1,16 +1,24 @@
 =pod
 
+=head1 NAME
+
 Net::OSCAR::Constants -- internal Net::OSCAR constants
+
+=head1 VERSION
+
+version 1.926_001
 
 =cut
 
 package Net::OSCAR::Constants;
+BEGIN {
+  $Net::OSCAR::Constants::VERSION = '1.926_001';
+}
 
-$VERSION = '1.926';
 $REVISION = '$Revision$';
 
 use strict;
-use vars qw(@ISA @EXPORT $VERSION);
+use vars qw(@ISA @EXPORT);
 use Scalar::Util qw(dualvar);
 use Net::OSCAR::TLV;
 require Exporter;

@@ -1,16 +1,23 @@
 =pod
 
+=head1 NAME
+
 Net::OSCAR::ServerCallbacks -- Process responses from OSCAR client
+
+=head1 VERSION
+
+version 1.926_001
 
 =cut
 
 package Net::OSCAR::ServerCallbacks;
+BEGIN {
+  $Net::OSCAR::ServerCallbacks::VERSION = '1.926_001';
+}
 
-$VERSION = '1.926';
 $REVISION = '$Revision$';
 
 use strict;
-use vars qw($VERSION);
 use Carp;
 
 use Net::OSCAR::Common qw(:all);
@@ -75,4 +82,3 @@ sub process_snac($$) {
 }
 
 1;
-

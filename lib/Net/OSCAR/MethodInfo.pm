@@ -1,18 +1,26 @@
 =pod
 
+=head1 NAME
+
+
+=head1 VERSION
+
+version 1.926_001
 Net::OSCAR::MethodInfo -- Mappings from method names to (SNAC,family).  Used by
 rate management functionality
 
 =cut
 
 package Net::OSCAR::MethodInfo;
+BEGIN {
+  $Net::OSCAR::MethodInfo::VERSION = '1.926_001';
+}
 
-$VERSION = '1.926';
 $REVISION = '$Revision$';
 
 use strict;
 use warnings;
-use vars qw(@ISA $VERSION $REVISION);
+use vars qw(@ISA $REVISION);
 use Net::OSCAR::XML;
 
 sub encode($) {

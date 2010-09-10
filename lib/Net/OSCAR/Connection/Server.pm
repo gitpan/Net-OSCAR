@@ -5,13 +5,15 @@ Net::OSCAR::Connection::Server -- Net::OSCAR server connection
 =cut
 
 package Net::OSCAR::Connection::Server;
+BEGIN {
+  $Net::OSCAR::Connection::Server::VERSION = '1.926_001';
+}
 
-$VERSION = '1.926';
 $REVISION = '$Revision$';
 @ISA = qw(Net::OSCAR::Connection);
 
 use strict;
-use vars qw($VERSION @ISA);
+use vars qw(@ISA);
 use Carp;
 use Socket;
 use Symbol;

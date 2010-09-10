@@ -1,7 +1,14 @@
 =pod
 
-Net::OSCAR::Buddylist -- tied hash class whose keys are Net::OSCAR::Screennames
-and which also maintains the ordering of its keys.
+=head1 NAME
+
+Net::OSCAR::Buddylist -- tied hash class whose keys are Net::OSCAR::Screennames and which also maintains the ordering of its keys.
+
+=head1 VERSION
+
+version 1.926_001
+
+=head1 DESCRIPTION
 
 OSCAR screennames don't compare like normal scalars; they're case and whitespace-insensitive.
 This is a tied hash class that has that behavior for its keys.
@@ -9,12 +16,13 @@ This is a tied hash class that has that behavior for its keys.
 =cut
 
 package Net::OSCAR::Buddylist;
+BEGIN {
+  $Net::OSCAR::Buddylist::VERSION = '1.926_001';
+}
 
-$VERSION = '1.926';
 $REVISION = '$Revision$';
 
 use strict;
-use vars qw($VERSION);
 
 use Carp;
 use Net::OSCAR::Screenname;
