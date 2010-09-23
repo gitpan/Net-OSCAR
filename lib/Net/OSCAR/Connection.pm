@@ -6,13 +6,13 @@ Net::OSCAR::Connection -- individual Net::OSCAR service connection
 
 =head1 VERSION
 
-version 1.926_001
+version 1.927
 
 =cut
 
 package Net::OSCAR::Connection;
 BEGIN {
-  $Net::OSCAR::Connection::VERSION = '1.926_001';
+  $Net::OSCAR::Connection::VERSION = '1.927';
 }
 
 $REVISION = '$Revision$';

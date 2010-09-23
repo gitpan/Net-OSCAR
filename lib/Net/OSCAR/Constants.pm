@@ -6,13 +6,13 @@ Net::OSCAR::Constants -- internal Net::OSCAR constants
 
 =head1 VERSION
 
-version 1.926_001
+version 1.927
 
 =cut
 
 package Net::OSCAR::Constants;
 BEGIN {
-  $Net::OSCAR::Constants::VERSION = '1.926_001';
+  $Net::OSCAR::Constants::VERSION = '1.927';
 }
 
 $REVISION = '$Revision$';

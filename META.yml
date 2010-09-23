@@ -36,4 +36,4 @@ requires:
 resources:
   homepage: http://github.com/toddr/net-oscar/tree
   repository: git://github.com/toddr/net-oscar.git
-version: 1.926_001
+version: 1.927

@@ -5,7 +5,7 @@
 
 =head1 VERSION
 
-version 1.926_001
+version 1.927
 Net::OSCAR::MethodInfo -- Mappings from method names to (SNAC,family).  Used by
 rate management functionality
 
@@ -13,7 +13,7 @@ rate management functionality
 
 package Net::OSCAR::MethodInfo;
 BEGIN {
-  $Net::OSCAR::MethodInfo::VERSION = '1.926_001';
+  $Net::OSCAR::MethodInfo::VERSION = '1.927';
 }
 
 $REVISION = '$Revision$';
