@@ -6,13 +6,13 @@ Net::OSCAR::ServerCallbacks -- Process responses from OSCAR client
 
 =head1 VERSION
 
-version 1.927
+version 1.927_001
 
 =cut
 
 package Net::OSCAR::ServerCallbacks;
 BEGIN {
-  $Net::OSCAR::ServerCallbacks::VERSION = '1.927';
+  $Net::OSCAR::ServerCallbacks::VERSION = '1.927_001';
 }
 
 $REVISION = '$Revision$';

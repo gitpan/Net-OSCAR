@@ -6,13 +6,13 @@ Net::OSCAR::Common -- Net::OSCAR public constants
 
 =head1 VERSION
 
-version 1.927
+version 1.927_001
 
 =cut
 
 package Net::OSCAR::Common;
 BEGIN {
-  $Net::OSCAR::Common::VERSION = '1.927';
+  $Net::OSCAR::Common::VERSION = '1.927_001';
 }
 
 $REVISION = '$Revision$';

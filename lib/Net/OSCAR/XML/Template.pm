@@ -3,7 +3,7 @@
 
 package Net::OSCAR::XML::Template;
 BEGIN {
-  $Net::OSCAR::XML::Template::VERSION = '1.927';
+  $Net::OSCAR::XML::Template::VERSION = '1.927_001';
 }
 
 use strict;

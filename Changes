@@ -1,5 +1,9 @@
 Revision history for Perl extension Net::OSCAR.
 
+1.927_001 2010-09-28 16:58:29 America/Chicago
+  - Evil hack to suppress le warnings in Net/OSCAR/Callbacks/1/rate_change.pm
+    RT 61341
+
 1.927     2010-09-23 12:16:08 America/Chicago
   - Tests Clean. Bumping version to release
 

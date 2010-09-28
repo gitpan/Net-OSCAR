@@ -6,7 +6,7 @@ Net::OSCAR::Screenname -- OSCAR screenname class
 
 =head1 VERSION
 
-version 1.927
+version 1.927_001
 
 =head1 DESCRIPTION
 
@@ -24,7 +24,7 @@ will be true.
 
 package Net::OSCAR::Screenname;
 BEGIN {
-  $Net::OSCAR::Screenname::VERSION = '1.927';
+  $Net::OSCAR::Screenname::VERSION = '1.927_001';
 }
 
 $REVISION = '$Revision$';

@@ -1,6 +1,6 @@
 package Net::OSCAR;
 BEGIN {
-  $Net::OSCAR::VERSION = '1.927';
+  $Net::OSCAR::VERSION = '1.927_001';
 }
 
 $REVISION = '$Revision$';
@@ -13,7 +13,7 @@ Net::OSCAR - Implementation of AOL's OSCAR protocol for instant messaging (for i
 
 =head1 VERSION
 
-version 1.927
+version 1.927_001
 
 =head1 SYNOPSIS
 
