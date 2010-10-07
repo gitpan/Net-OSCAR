@@ -6,7 +6,7 @@ Net::OSCAR::_BLInternal -- internal buddylist stuff
 
 =head1 VERSION
 
-version 1.927_001
+version 1.928
 
 =head1 DESCRIPTION
 
@@ -17,7 +17,7 @@ and the sending of buddylist changes to the OSCAR server.
 
 package Net::OSCAR::_BLInternal;
 BEGIN {
-  $Net::OSCAR::_BLInternal::VERSION = '1.927_001';
+  $Net::OSCAR::_BLInternal::VERSION = '1.928';
 }
 
 use strict;

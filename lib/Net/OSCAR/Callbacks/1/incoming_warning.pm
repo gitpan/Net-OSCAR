@@ -1,6 +1,6 @@
 package Net::OSCAR::Callbacks;
 BEGIN {
-  $Net::OSCAR::Callbacks::VERSION = '1.927_001';
+  $Net::OSCAR::Callbacks::VERSION = '1.928';
 }
 use strict;
 use warnings;

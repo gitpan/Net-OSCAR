@@ -6,7 +6,7 @@ Net::OSCAR::Buddylist -- tied hash class whose keys are Net::OSCAR::Screennames 
 
 =head1 VERSION
 
-version 1.927_001
+version 1.928
 
 =head1 DESCRIPTION
 
@@ -17,7 +17,7 @@ This is a tied hash class that has that behavior for its keys.
 
 package Net::OSCAR::Buddylist;
 BEGIN {
-  $Net::OSCAR::Buddylist::VERSION = '1.927_001';
+  $Net::OSCAR::Buddylist::VERSION = '1.928';
 }
 
 $REVISION = '$Revision$';

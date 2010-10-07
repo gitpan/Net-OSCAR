@@ -6,7 +6,7 @@ Net::OSCAR::Connection::Server -- Net::OSCAR server connection
 
 package Net::OSCAR::Connection::Server;
 BEGIN {
-  $Net::OSCAR::Connection::Server::VERSION = '1.927_001';
+  $Net::OSCAR::Connection::Server::VERSION = '1.928';
 }
 
 $REVISION = '$Revision$';

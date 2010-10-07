@@ -6,7 +6,7 @@ Net::OSCAR::Connection::Direct -- OSCAR direct connections
 
 package Net::OSCAR::Connection::Direct;
 BEGIN {
-  $Net::OSCAR::Connection::Direct::VERSION = '1.927_001';
+  $Net::OSCAR::Connection::Direct::VERSION = '1.928';
 }
 
 $REVISION = '$Revision$';

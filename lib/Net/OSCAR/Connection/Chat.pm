@@ -6,7 +6,7 @@ Net::OSCAR::Connection::Chat -- OSCAR chat connections
 
 package Net::OSCAR::Connection::Chat;
 BEGIN {
-  $Net::OSCAR::Connection::Chat::VERSION = '1.927_001';
+  $Net::OSCAR::Connection::Chat::VERSION = '1.928';
 }
 
 $REVISION = '$Revision$';

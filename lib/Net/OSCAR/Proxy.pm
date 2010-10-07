@@ -1,6 +1,6 @@
 package Net::OSCAR::Proxy;
 BEGIN {
-  $Net::OSCAR::Proxy::VERSION = '1.927_001';
+  $Net::OSCAR::Proxy::VERSION = '1.928';
 }
 
 $REVISION = '$Revision$';

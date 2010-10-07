@@ -6,7 +6,7 @@ Net::OSCAR::TLV -- tied hash for OSCAR TLVs
 
 =head1 VERSION
 
-version 1.927_001
+version 1.928
 
 =head1 DESCRIPTION
 
@@ -17,7 +17,7 @@ This class also preserves the ordering of its keys.
 
 package Net::OSCAR::TLV;
 BEGIN {
-  $Net::OSCAR::TLV::VERSION = '1.927_001';
+  $Net::OSCAR::TLV::VERSION = '1.928';
 }
 
 $REVISION = '$Revision$';

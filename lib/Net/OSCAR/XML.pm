@@ -6,7 +6,7 @@ Net::OSCAR::XML -- XML functions for Net::OSCAR
 
 =head1 VERSION
 
-version 1.927_001
+version 1.928
 
 =head1 DESCRIPTION
 
@@ -30,7 +30,7 @@ for every protocol element.
 
 package Net::OSCAR::XML;
 BEGIN {
-  $Net::OSCAR::XML::VERSION = '1.927_001';
+  $Net::OSCAR::XML::VERSION = '1.928';
 }
 
 $REVISION = '$Revision$';
